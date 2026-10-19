@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import time
 from google.oauth2 import service_account
@@ -9,26 +10,37 @@ print("=== [PROJETO KLEBEE: SERVIDOR NA NUVEM COM GOOGLE DRIVE] ===")
 PASTA_SAIDA = "videos_produzidos"
 os.makedirs(PASTA_SAIDA, exist_ok=True)
 
+def obter_credenciais():
+    # 1. Tenta carregar do arquivo local service_account.json se existir
+    if os.path.exists("service_account.json"):
+        print("[Google Drive] Usando arquivo service_account.json local.")
+        return service_account.Credentials.from_service_account_file(
+            "service_account.json", scopes=["https://www.googleapis.com/auth/drive"]
+        )
+    
+    # 2. Tenta carregar da variável de ambiente GOOGLE_SERVICE_ACCOUNT_JSON
+    service_account_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if service_account_env:
+        print("[Google Drive] Usando variável GOOGLE_SERVICE_ACCOUNT_JSON.")
+        info = json.loads(service_account_env)
+        return service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+
+    print("[Google Drive] Erro: Nenhuma credencial encontrada (arquivo service_account.json ou variável GOOGLE_SERVICE_ACCOUNT_JSON em falta).")
+    return None
+
 def enviar_para_drive(caminho_arquivo, nome_arquivo):
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
     if not folder_id:
         print("[Google Drive] Erro: GOOGLE_DRIVE_FOLDER_ID não configurada.")
         return
 
-    try:
-        # Nota: O Railway lê credenciais se configuradas por variáveis ou arquivo de chave json
-        creds = None
-        # Se houver um arquivo de credenciais local no Railway (ex: service_account.json)
-        if os.path.exists("service_account.json"):
-            creds = service_account.Credentials.from_service_account_file(
-                "service_account.json", scopes=["https://www.googleapis.com/auth/drive"]
-            )
-        else:
-            # Tenta autenticação padrão do ambiente se aplicável
-            creds = service_account.Credentials.from_service_account_info(
-                os.environ, scopes=["https://www.googleapis.com/auth/drive"]
-            )
+    creds = obter_credenciais()
+    if not creds:
+        return
 
+    try:
         service = build('drive', 'v3', credentials=creds)
 
         file_metadata = {
@@ -45,14 +57,14 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
         
         print(f"[Google Drive] Vídeo enviado com sucesso! ID no Drive: {file.get('id')}")
     except Exception as e:
-        print(f"[Google Drive] Erro no upload: {e}")
+        print(f"[Google Drive] Erro detalhado no upload: {e}")
 
 def processar_ciclo():
     print("\n[Robô] Iniciando ciclo de renderização...")
     nome_video = f"VIDEO_{int(time.time())}.mp4"
     final = os.path.join(PASTA_SAIDA, nome_video)
     
-    # Gera o vídeo vertical (1080x1920) com a headline diretamente
+    # Gera o vídeo vertical (1080x1920)
     comando_ffmpeg = [
         "ffmpeg", "-y",
         "-f", "lavfi",
