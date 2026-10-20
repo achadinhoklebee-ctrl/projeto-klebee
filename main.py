@@ -63,7 +63,6 @@ def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     """Gera um vídeo utilizando o FFmpeg diretamente no ambiente do Railway."""
     print(f"Iniciando renderização do vídeo com FFmpeg: {nome_saida}", flush=True)
     
-    # Exemplo de comando FFmpeg para gerar um vídeo de fundo sólido com texto/resolução vertical (ideal para reels/TikTok/Achadinhos)
     comando = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", "color=c=navy:s=1080x1920:d=5",
@@ -92,8 +91,8 @@ def loop_principal():
         print("CRÍTICO: Não foi possível conectar ao Drive. Encerrando execução.", flush=True)
         sys.exit(1)
         
-    # Insira o ID correto da sua pasta do Google Drive aqui se desejar direcionar para lá
-    FOLDER_ID = "SEU_FOLDER_ID_AQUI" 
+    # Cole o ID da sua pasta do Google Drive entre as aspas abaixo:
+    FOLDER_ID = "COLE_O_ID_DA_SUA_PASTA_AQUI" 
         
     print("=== [5/6] ENTRANDO NO LOOP CONTINUO DO ROBÔ ===", flush=True)
     
@@ -103,10 +102,10 @@ def loop_principal():
         
         arquivo_video = f"shopee_video_{ciclo}.mp4"
         
-        # 1. Gera o vídeo utilizando o FFmpeg
+        # 1. Gera o vídeo
         sucesso_geracao = gerar_video_ffmpeg(arquivo_video)
         
-        # 2. Se gerado com sucesso, envia para o Google Drive e limpa o arquivo local
+        # 2. Envia para a pasta informada e remove o arquivo local
         if sucesso_geracao and os.path.exists(arquivo_video):
             enviar_para_drive(drive_service, arquivo_video, FOLDER_ID)
             try:
@@ -117,7 +116,7 @@ def loop_principal():
                 
         print(f"--- [CICLO {ciclo}] Concluído. Aguardando próximo intervalo... ---", flush=True)
         ciclo += 1
-        time.sleep(60) # Intervalo de 1 minuto entre os ciclos
+        time.sleep(60)
 
 if __name__ == "__main__":
     print("=== [6/6] EXECUÇÃO DO BLOCO MAIN ===", flush=True)
