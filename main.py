@@ -2,38 +2,43 @@ import os
 import json
 import subprocess
 import time
+import sys
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 print("=== [PROJETO KLEBEE: SERVIDOR NA NUVEM COM GOOGLE DRIVE] ===")
+sys.stdout.flush()
+
 PASTA_SAIDA = "videos_produzidos"
 os.makedirs(PASTA_SAIDA, exist_ok=True)
 
 def obter_credenciais():
-    # 1. Tenta carregar do arquivo local service_account.json se existir
     if os.path.exists("service_account.json"):
         print("[Google Drive] Usando arquivo service_account.json local.")
+        sys.stdout.flush()
         return service_account.Credentials.from_service_account_file(
             "service_account.json", scopes=["https://www.googleapis.com/auth/drive"]
         )
     
-    # 2. Tenta carregar da variável de ambiente GOOGLE_SERVICE_ACCOUNT_JSON
     service_account_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if service_account_env:
         print("[Google Drive] Usando variável GOOGLE_SERVICE_ACCOUNT_JSON.")
+        sys.stdout.flush()
         info = json.loads(service_account_env)
         return service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/drive"]
         )
 
-    print("[Google Drive] Erro: Nenhuma credencial encontrada (arquivo service_account.json ou variável GOOGLE_SERVICE_ACCOUNT_JSON em falta).")
+    print("[Google Drive] Erro: Nenhuma credencial encontrada.")
+    sys.stdout.flush()
     return None
 
 def enviar_para_drive(caminho_arquivo, nome_arquivo):
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
     if not folder_id:
         print("[Google Drive] Erro: GOOGLE_DRIVE_FOLDER_ID não configurada.")
+        sys.stdout.flush()
         return
 
     creds = obter_credenciais()
@@ -43,9 +48,9 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
     try:
         service = build('drive', 'v3', credentials=creds)
 
-        # Garante o caminho absoluto do arquivo gerado
         caminho_absoluto = os.path.abspath(caminho_arquivo)
         print(f"[Google Drive] Preparando upload do arquivo: {caminho_absoluto}")
+        sys.stdout.flush()
 
         file_metadata = {
             'name': nome_arquivo,
@@ -61,15 +66,18 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
         ).execute()
         
         print(f"[Google Drive] Vídeo enviado com sucesso! ID no Drive: {file.get('id')}")
+        sys.stdout.flush()
     except Exception as e:
         print(f"[Google Drive] Erro detalhado no upload: {e}")
+        sys.stdout.flush()
 
 def processar_ciclo():
     print("\n[Robô] Iniciando ciclo de renderização...")
+    sys.stdout.flush()
+    
     nome_video = f"VIDEO_{int(time.time())}.mp4"
     final = os.path.join(PASTA_SAIDA, nome_video)
     
-    # Gera o vídeo vertical (1080x1920) otimizado para nuvem
     comando_ffmpeg = [
         "ffmpeg", "-y",
         "-f", "lavfi",
@@ -85,13 +93,15 @@ def processar_ciclo():
     
     if res.returncode == 0:
         print(f"[Robô] Vídeo gerado com sucesso: {final}")
-        # Envia o vídeo gerado para o Google Drive
+        sys.stdout.flush()
         enviar_para_drive(final, nome_video)
     else:
         print("[Robô] Erro ao gerar o vídeo via FFmpeg.")
+        sys.stdout.flush()
 
 if __name__ == "__main__":
     while True:
         processar_ciclo()
         print("[Robô] Aguardando próximo ciclo (60 segundos)...")
+        sys.stdout.flush()
         time.sleep(60)
