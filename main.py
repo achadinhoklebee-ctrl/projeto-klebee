@@ -38,7 +38,7 @@ def autenticar_drive():
         return None
 
 def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.klebee@gmail.com"):
-    """Envia o arquivo para a pasta compartilhada."""
+    """Envia o arquivo para o Google Drive e concede acesso total imediato."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
         
@@ -51,7 +51,7 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
         
         print(f"A ENVIAR PARA O DRIVE: '{nome_arquivo}'...", flush=True)
         
-        # Adicionado o parâmetro extra para utilizar o espaço da pasta compartilhada do destino
+        # Criação do arquivo na pasta partilhada
         file = service.files().create(
             body=file_metadata,
             media_body=media,
@@ -62,22 +62,38 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
         file_id = file.get('id')
         print(f"-> UPLOAD CONCLUÍDO! ID: {file_id}", flush=True)
 
-        # FORÇAR PERMISSÃO PARA O SEU EMAIL PESSOAL
+        # CONCEDER PERMISSÃO DE ESCRITA/PROPRIEDADE AO SEU E-MAIL
         try:
             permission = {
                 'type': 'user',
-                'role': 'writer',
+                'role': 'owner',  # Define como proprietário para transferir o consumo de cota
                 'emailAddress': seu_email
             }
             service.permissions().create(
                 fileId=file_id,
                 body=permission,
-                fields='id',
+                transferOwnership=True,
+                sendNotificationEmail=False,
                 supportsAllDrives=True
             ).execute()
-            print(f"-> Permissão concedida com sucesso para {seu_email}!", flush=True)
+            print(f"-> Propriedade transferida com sucesso para {seu_email}!", flush=True)
         except Exception as perm_err:
-            print(f"Aviso ao definir permissão do ficheiro: {perm_err}", flush=True)
+            print(f"Aviso ao transferir propriedade (tentando como writer): {perm_err}", flush=True)
+            # Fallback caso a transferência de owner direta exija Workspace corporativo
+            try:
+                fallback_perm = {
+                    'type': 'user',
+                    'role': 'writer',
+                    'emailAddress': seu_email
+                }
+                service.permissions().create(
+                    fileId=file_id,
+                    body=fallback_perm,
+                    supportsAllDrives=True
+                ).execute()
+                print(f"-> Permissão de escrita concedida para {seu_email}!", flush=True)
+            except Exception as inner_err:
+                print(f"Erro secundário de permissão: {inner_err}", flush=True)
 
         print(f"-> LINK DIRETO DO VÍDEO: {file.get('webViewLink')}", flush=True)
     except Exception as e:
