@@ -47,12 +47,13 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
             'name': nome_arquivo,
             'parents': [folder_id]
         }
-        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4')
+        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=True)
         
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id'
+            fields='id',
+            supportsAllDrives=True
         ).execute()
         
         print(f"[Google Drive] Vídeo enviado com sucesso! ID no Drive: {file.get('id')}")
@@ -71,7 +72,7 @@ def processar_ciclo():
         "-i", "color=c=navy:s=1080x1920:d=10",
         "-vf", "drawtext=text='ACHADINHO IMPERDÍVEL!':fontcolor=yellow:fontsize=50:x=(w-text_w)/2:y=200",
         "-c:v", "libx264",
-        "-preset", "ultrafast",  # <-- Força o servidor a renderizar super rápido
+        "-preset", "ultrafast",
         "-pix_fmt", "yuv420p",
         final
     ]
