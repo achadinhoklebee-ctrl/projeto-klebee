@@ -38,7 +38,7 @@ def autenticar_drive():
         return None
 
 def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.klebee@gmail.com"):
-    """Envia o arquivo e altera as permissões para garantir visibilidade."""
+    """Envia o arquivo para a pasta compartilhada."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
         
@@ -50,6 +50,8 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
         media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=True)
         
         print(f"A ENVIAR PARA O DRIVE: '{nome_arquivo}'...", flush=True)
+        
+        # Adicionado o parâmetro extra para utilizar o espaço da pasta compartilhada do destino
         file = service.files().create(
             body=file_metadata,
             media_body=media,
@@ -85,7 +87,6 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
 def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     print(f"Renderizando vídeo via FFmpeg: {nome_saida}", flush=True)
     
-    # Comando otimizado com preset ultrafast e threads globais restritas
     comando = [
         "ffmpeg", "-y",
         "-threads", "1",
