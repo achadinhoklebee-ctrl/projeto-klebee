@@ -15,16 +15,12 @@ os.makedirs(PASTA_SAIDA, exist_ok=True)
 
 def obter_credenciais():
     if os.path.exists("service_account.json"):
-        print("[Google Drive] Usando arquivo service_account.json local.")
-        sys.stdout.flush()
         return service_account.Credentials.from_service_account_file(
             "service_account.json", scopes=["https://www.googleapis.com/auth/drive"]
         )
     
     service_account_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if service_account_env:
-        print("[Google Drive] Usando variável GOOGLE_SERVICE_ACCOUNT_JSON.")
-        sys.stdout.flush()
         info = json.loads(service_account_env)
         return service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/drive"]
@@ -47,10 +43,7 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
 
     try:
         service = build('drive', 'v3', credentials=creds)
-
         caminho_absoluto = os.path.abspath(caminho_arquivo)
-        print(f"[Google Drive] Preparando upload do arquivo: {caminho_absoluto}")
-        sys.stdout.flush()
 
         file_metadata = {
             'name': nome_arquivo,
