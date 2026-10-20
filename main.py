@@ -85,8 +85,10 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
 def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     print(f"Renderizando vídeo via FFmpeg: {nome_saida}", flush=True)
     
+    # Adicionado '-threads', '1' para evitar o consumo excessivo de RAM que causava o SIGKILL
     comando = [
         "ffmpeg", "-y",
+        "-threads", "1",
         "-f", "lavfi", "-i", "color=c=navy:s=1080x1920:d=5",
         "-vf", "drawtext=text='ACHADINHOS SHOPEE':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -94,7 +96,6 @@ def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     ]
     
     try:
-        # Executa sem capturar o stderr de forma bloqueante para evitar falsos positivos
         resultado = subprocess.run(comando, check=True)
         print("-> Vídeo gerado com sucesso pelo FFmpeg!", flush=True)
         return True
