@@ -1,3 +1,4 @@
+print("ROBÔ INICIADO: A carregar bibliotecas...", flush=True)
 def enviar_para_drive(caminho_arquivo, nome_arquivo):
     creds = obter_credenciais()
     if not creds:
