@@ -43,11 +43,15 @@ def enviar_para_drive(caminho_arquivo, nome_arquivo):
     try:
         service = build('drive', 'v3', credentials=creds)
 
+        # Garante o caminho absoluto do arquivo gerado
+        caminho_absoluto = os.path.abspath(caminho_arquivo)
+        print(f"[Google Drive] Preparando upload do arquivo: {caminho_absoluto}")
+
         file_metadata = {
             'name': nome_arquivo,
             'parents': [folder_id]
         }
-        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=True)
+        media = MediaFileUpload(caminho_absoluto, mimetype='video/mp4', resumable=True)
         
         file = service.files().create(
             body=file_metadata,
