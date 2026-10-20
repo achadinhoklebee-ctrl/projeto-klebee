@@ -36,6 +36,28 @@ def autenticar_drive():
         traceback.print_exc()
         return None
 
+def enviar_para_drive(service, caminho_arquivo, folder_id):
+    """Função para enviar vídeo para a pasta designada sem enviar e-mails de notificação."""
+    try:
+        nome_arquivo = os.path.basename(caminho_arquivo)
+        file_metadata = {
+            'name': nome_arquivo,
+            'parents': [folder_id]
+        }
+        media = MediaFileUpload(caminho_arquivo, resumable=True)
+        
+        print(f"A enviar '{nome_arquivo}' para o Google Drive...", flush=True)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id',
+            sendNotificationEmail=False  # Mantém o upload totalmente silencioso
+        ).execute()
+        
+        print(f"-> Upload concluído com sucesso! ID no Drive: {file.get('id')}", flush=True)
+    except Exception as e:
+        print(f"Erro ao enviar arquivo para o Drive: {e}", flush=True)
+
 def loop_principal():
     print("=== [4/6] INICIALIZANDO O SERVIÇO DO DRIVE ===", flush=True)
     drive_service = autenticar_drive()
@@ -44,18 +66,25 @@ def loop_principal():
         print("CRÍTICO: Não foi possível conectar ao Drive. Encerrando execução.", flush=True)
         sys.exit(1)
         
+    # ID da sua pasta no Google Drive (substitua caso necessário ou deixe parametrizado)
+    FOLDER_ID = "SEU_FOLDER_ID_AQUI" 
+        
     print("=== [5/6] ENTRANDO NO LOOP CONTINUO DO ROBÔ ===", flush=True)
     
     ciclo = 1
     while True:
-        print(f"--- [CICLO {ciclo}] Processando vídeos / Verificando fila... ---", flush=True)
+        print(f"--- [CICLO {ciclo}] Verificando/Gerando novos vídeos... ---", flush=True)
         
-        # Adicione aqui as suas chamadas de geração/renderização com FFmpeg e upload
-        # Exemplo de log de status:
-        print(f"--- [CICLO {ciclo}] Aguardando próximo intervalo... ---", flush=True)
+        # 1. Aqui entra a sua lógica de processamento / FFmpeg para gerar o vídeo
+        # Exemplo: os.system("ffmpeg ...")
         
+        # 2. Aqui entra o envio do vídeo gerado:
+        # if os.path.exists("video_gerado.mp4"):
+        #     enviar_para_drive(drive_service, "video_gerado.mp4", FOLDER_ID)
+        
+        print(f"--- [CICLO {ciclo}] Concluído. Aguardando próximo intervalo... ---", flush=True)
         ciclo += 1
-        time.sleep(60) # Intervalo de 60 segundos entre as verificações
+        time.sleep(300) # Intervalo de 5 minutos entre os ciclos
 
 if __name__ == "__main__":
     print("=== [6/6] EXECUÇÃO DO BLOCO MAIN ===", flush=True)
