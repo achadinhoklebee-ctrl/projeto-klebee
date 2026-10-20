@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import subprocess
 import traceback
 
 print("=== [1/6] INICIANDO SCRIPT PRINCIPAL ===", flush=True)
@@ -37,7 +38,7 @@ def autenticar_drive():
         return None
 
 def enviar_para_drive(service, caminho_arquivo, folder_id):
-    """Função para enviar vídeo para a pasta designada sem enviar e-mails de notificação."""
+    """Função para enviar vídeo para a pasta designada sem disparar notificações por e-mail."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
         file_metadata = {
@@ -51,12 +52,37 @@ def enviar_para_drive(service, caminho_arquivo, folder_id):
             body=file_metadata,
             media_body=media,
             fields='id',
-            sendNotificationEmail=False  # Mantém o upload totalmente silencioso
+            sendNotificationEmail=False
         ).execute()
         
         print(f"-> Upload concluído com sucesso! ID no Drive: {file.get('id')}", flush=True)
     except Exception as e:
         print(f"Erro ao enviar arquivo para o Drive: {e}", flush=True)
+
+def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
+    """Gera um vídeo utilizando o FFmpeg diretamente no ambiente do Railway."""
+    print(f"Iniciando renderização do vídeo com FFmpeg: {nome_saida}", flush=True)
+    
+    # Exemplo de comando FFmpeg para gerar um vídeo de fundo sólido com texto/resolução vertical (ideal para reels/TikTok/Achadinhos)
+    comando = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=navy:s=1080x1920:d=5",
+        "-vf", "drawtext=text='ACHADINHOS SHOPEE':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        nome_saida
+    ]
+    
+    try:
+        resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if resultado.returncode == 0:
+            print("-> Vídeo gerado com sucesso via FFmpeg!", flush=True)
+            return True
+        else:
+            print(f"Erro no FFmpeg: {resultado.stderr}", flush=True)
+            return False
+    except Exception as e:
+        print(f"Exceção ao executar FFmpeg: {e}", flush=True)
+        return False
 
 def loop_principal():
     print("=== [4/6] INICIALIZANDO O SERVIÇO DO DRIVE ===", flush=True)
@@ -66,25 +92,32 @@ def loop_principal():
         print("CRÍTICO: Não foi possível conectar ao Drive. Encerrando execução.", flush=True)
         sys.exit(1)
         
-    # ID da sua pasta no Google Drive (substitua caso necessário ou deixe parametrizado)
+    # Insira o ID correto da sua pasta do Google Drive aqui se desejar direcionar para lá
     FOLDER_ID = "SEU_FOLDER_ID_AQUI" 
         
     print("=== [5/6] ENTRANDO NO LOOP CONTINUO DO ROBÔ ===", flush=True)
     
     ciclo = 1
     while True:
-        print(f"--- [CICLO {ciclo}] Verificando/Gerando novos vídeos... ---", flush=True)
+        print(f"--- [CICLO {ciclo}] Iniciando produção do lote de vídeos ---", flush=True)
         
-        # 1. Aqui entra a sua lógica de processamento / FFmpeg para gerar o vídeo
-        # Exemplo: os.system("ffmpeg ...")
+        arquivo_video = f"shopee_video_{ciclo}.mp4"
         
-        # 2. Aqui entra o envio do vídeo gerado:
-        # if os.path.exists("video_gerado.mp4"):
-        #     enviar_para_drive(drive_service, "video_gerado.mp4", FOLDER_ID)
+        # 1. Gera o vídeo utilizando o FFmpeg
+        sucesso_geracao = gerar_video_ffmpeg(arquivo_video)
         
+        # 2. Se gerado com sucesso, envia para o Google Drive e limpa o arquivo local
+        if sucesso_geracao and os.path.exists(arquivo_video):
+            enviar_para_drive(drive_service, arquivo_video, FOLDER_ID)
+            try:
+                os.remove(arquivo_video)
+                print(f"-> Arquivo temporário {arquivo_video} removido do disco.", flush=True)
+            except Exception as ex:
+                print(f"Aviso ao remover arquivo local: {ex}", flush=True)
+                
         print(f"--- [CICLO {ciclo}] Concluído. Aguardando próximo intervalo... ---", flush=True)
         ciclo += 1
-        time.sleep(300) # Intervalo de 5 minutos entre os ciclos
+        time.sleep(60) # Intervalo de 1 minuto entre os ciclos
 
 if __name__ == "__main__":
     print("=== [6/6] EXECUÇÃO DO BLOCO MAIN ===", flush=True)
