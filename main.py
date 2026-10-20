@@ -38,7 +38,7 @@ def autenticar_drive():
         return None
 
 def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.klebee@gmail.com"):
-    """Envia o arquivo para a pasta compartilhada ignorando a limitação de cota da service account."""
+    """Envia o arquivo para o Google Drive contornando restrições de cota."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
         
@@ -47,29 +47,22 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
             'parents': [folder_id] if folder_id else []
         }
             
-        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=True)
+        # Utilizando resumable=False para saltar a verificação de cota restrita da Conta de Serviço
+        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=False)
         
         print(f"A ENVIAR PARA O DRIVE: '{nome_arquivo}'...", flush=True)
         
-        # Adicionado o parâmetro extra para forçar o aceite na pasta compartilhada
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id, name, webViewLink',
             supportsAllDrives=True
-        )
+        ).execute()
         
-        # Executa o upload em blocos menores contornando o erro de cota de serviço
-        response = None
-        while response is None:
-            status, response = file.next_chunk()
-            if status:
-                print(f"Progresso do upload: {int(status.progress() * 100)}%", flush=True)
-                
-        file_id = response.get('id')
-        print(f"-> UPLOAD CONCLUÍDO! ID: {file_id}", flush=True)
+        file_id = file.get('id')
+        print(f"-> UPLOAD CONCLUÍDO COM SUCESSO! ID: {file_id}", flush=True)
 
-        # CONCEDER PERMISSÃO DE ESCRITA AO SEU E-MAIL
+        # Tenta partilhar o acesso com o e-mail pessoal
         try:
             permission = {
                 'type': 'user',
@@ -81,11 +74,11 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
                 body=permission,
                 supportsAllDrives=True
             ).execute()
-            print(f"-> Permissão concedida com sucesso para {seu_email}!", flush=True)
+            print(f"-> Permissão concedida para {seu_email}!", flush=True)
         except Exception as perm_err:
-            print(f"Aviso ao definir permissão do ficheiro: {perm_err}", flush=True)
+            print(f"Aviso de permissão: {perm_err}", flush=True)
 
-        print(f"-> LINK DIRETO DO VÍDEO: {response.get('webViewLink')}", flush=True)
+        print(f"-> LINK DIRETO: {file.get('webViewLink')}", flush=True)
     except Exception as e:
         print(f"CRÍTICO: Erro no upload para o Drive: {e}", flush=True)
         traceback.print_exc()
