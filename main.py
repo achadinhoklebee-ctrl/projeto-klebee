@@ -60,7 +60,7 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
         file_id = file.get('id')
         print(f"-> UPLOAD CONCLUÍDO! ID: {file_id}", flush=True)
 
-        # FORÇAR PERMISSÃO DE LEITURA/ESCRITA PARA O SEU EMAIL PESSOAL
+        # FORÇAR PERMISSÃO PARA O SEU EMAIL PESSOAL
         try:
             permission = {
                 'type': 'user',
@@ -94,13 +94,13 @@ def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     ]
     
     try:
-        resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if resultado.returncode == 0:
-            print("-> Vídeo gerado com sucesso pelo FFmpeg!", flush=True)
-            return True
-        else:
-            print(f"Erro no FFmpeg: {resultado.stderr}", flush=True)
-            return False
+        # Executa sem capturar o stderr de forma bloqueante para evitar falsos positivos
+        resultado = subprocess.run(comando, check=True)
+        print("-> Vídeo gerado com sucesso pelo FFmpeg!", flush=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Erro crítico no FFmpeg: {e}", flush=True)
+        return False
     except Exception as e:
         print(f"Exceção ao executar FFmpeg: {e}", flush=True)
         return False
