@@ -38,30 +38,33 @@ def autenticar_drive():
         return None
 
 def enviar_para_drive(service, caminho_arquivo, folder_id):
-    """Função para enviar vídeo para a pasta designada sem disparar notificações por e-mail."""
+    """Envia o arquivo diretamente para a pasta configurada."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
-        file_metadata = {
-            'name': nome_arquivo,
-            'parents': [folder_id]
-        }
-        media = MediaFileUpload(caminho_arquivo, resumable=True)
         
-        print(f"A enviar '{nome_arquivo}' para o Google Drive...", flush=True)
+        file_metadata = {'name': nome_arquivo}
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
+            
+        media = MediaFileUpload(caminwood_arquivo if 'caminwood_arquivo' in locals() else caminho_arquivo, mimetype='video/mp4', resumable=True)
+        
+        print(f"A ENVIAR PARA O DRIVE: '{nome_arquivo}'...", flush=True)
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id',
+            fields='id, name, webViewLink',
+            supportsAllDrives=True,
             sendNotificationEmail=False
         ).execute()
         
-        print(f"-> Upload concluído com sucesso! ID no Drive: {file.get('id')}", flush=True)
+        print(f"-> UPLOAD CONCLUÍDO COM SUCESSO!", flush=True)
+        print(f"-> Link direto do arquivo: {file.get('webViewLink')}", flush=True)
     except Exception as e:
-        print(f"Erro ao enviar arquivo para o Drive: {e}", flush=True)
+        print(f"CRÍTICO: Erro no upload para o Drive: {e}", flush=True)
+        traceback.print_exc()
 
 def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
-    """Gera um vídeo utilizando o FFmpeg diretamente no ambiente do Railway."""
-    print(f"Iniciando renderização do vídeo com FFmpeg: {nome_saida}", flush=True)
+    print(f"Renderizando vídeo via FFmpeg: {nome_saida}", flush=True)
     
     comando = [
         "ffmpeg", "-y",
@@ -74,7 +77,7 @@ def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     try:
         resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if resultado.returncode == 0:
-            print("-> Vídeo gerado com sucesso via FFmpeg!", flush=True)
+            print("-> Vídeo gerado com sucesso pelo FFmpeg!", flush=True)
             return True
         else:
             print(f"Erro no FFmpeg: {resultado.stderr}", flush=True)
@@ -91,30 +94,24 @@ def loop_principal():
         print("CRÍTICO: Não foi possível conectar ao Drive. Encerrando execução.", flush=True)
         sys.exit(1)
         
-    # Cole o ID da sua pasta do Google Drive entre as aspas abaixo:
-    FOLDER_ID = "COLE_O_ID_DA_SUA_PASTA_AQUI" 
+    # ID da pasta configurado automaticamente
+    FOLDER_ID = "1mEKp9mdgKE-owpBIb032rLPojnxKlpaD" 
         
     print("=== [5/6] ENTRANDO NO LOOP CONTINUO DO ROBÔ ===", flush=True)
     
     ciclo = 1
     while True:
-        print(f"--- [CICLO {ciclo}] Iniciando produção do lote de vídeos ---", flush=True)
+        print(f"\n--- [CICLO {ciclo}] Gerando e enviando vídeo ---", flush=True)
         
         arquivo_video = f"shopee_video_{ciclo}.mp4"
         
-        # 1. Gera o vídeo
-        sucesso_geracao = gerar_video_ffmpeg(arquivo_video)
-        
-        # 2. Envia para a pasta informada e remove o arquivo local
-        if sucesso_geracao and os.path.exists(arquivo_video):
+        if gerar_video_ffmpeg(arquivo_video):
             enviar_para_drive(drive_service, arquivo_video, FOLDER_ID)
-            try:
+            if os.path.exists(arquivo_video):
                 os.remove(arquivo_video)
-                print(f"-> Arquivo temporário {arquivo_video} removido do disco.", flush=True)
-            except Exception as ex:
-                print(f"Aviso ao remover arquivo local: {ex}", flush=True)
+                print(f"-> Vídeo local {arquivo_video} limpo com sucesso.", flush=True)
                 
-        print(f"--- [CICLO {ciclo}] Concluído. Aguardando próximo intervalo... ---", flush=True)
+        print(f"--- [CICLO {ciclo}] Aguardando próximo intervalo... ---", flush=True)
         ciclo += 1
         time.sleep(60)
 
