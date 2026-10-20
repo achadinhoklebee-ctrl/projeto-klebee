@@ -64,13 +64,14 @@ def processar_ciclo():
     nome_video = f"VIDEO_{int(time.time())}.mp4"
     final = os.path.join(PASTA_SAIDA, nome_video)
     
-    # Gera o vídeo vertical (1080x1920)
+    # Gera o vídeo vertical (1080x1920) otimizado para nuvem
     comando_ffmpeg = [
         "ffmpeg", "-y",
         "-f", "lavfi",
         "-i", "color=c=navy:s=1080x1920:d=10",
         "-vf", "drawtext=text='ACHADINHO IMPERDÍVEL!':fontcolor=yellow:fontsize=50:x=(w-text_w)/2:y=200",
         "-c:v", "libx264",
+        "-preset", "ultrafast",  # <-- Força o servidor a renderizar super rápido
         "-pix_fmt", "yuv420p",
         final
     ]
