@@ -85,13 +85,13 @@ def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.
 def gerar_video_ffmpeg(nome_saida="video_shopee.mp4"):
     print(f"Renderizando vídeo via FFmpeg: {nome_saida}", flush=True)
     
-    # Adicionado '-threads', '1' para evitar o consumo excessivo de RAM que causava o SIGKILL
+    # Comando otimizado com preset ultrafast e threads globais restritas
     comando = [
         "ffmpeg", "-y",
         "-threads", "1",
         "-f", "lavfi", "-i", "color=c=navy:s=1080x1920:d=5",
         "-vf", "drawtext=text='ACHADINHOS SHOPEE':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p",
         nome_saida
     ]
     
