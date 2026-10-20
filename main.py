@@ -37,28 +37,47 @@ def autenticar_drive():
         traceback.print_exc()
         return None
 
-def enviar_para_drive(service, caminho_arquivo, folder_id):
-    """Envia o arquivo diretamente para a pasta configurada."""
+def enviar_para_drive(service, caminho_arquivo, folder_id, seu_email="achadinho.klebee@gmail.com"):
+    """Envia o arquivo e altera as permissões para garantir visibilidade."""
     try:
         nome_arquivo = os.path.basename(caminho_arquivo)
         
-        file_metadata = {'name': nome_arquivo}
-        if folder_id:
-            file_metadata['parents'] = [folder_id]
+        file_metadata = {
+            'name': nome_arquivo,
+            'parents': [folder_id] if folder_id else []
+        }
             
-        media = MediaFileUpload(caminwood_arquivo if 'caminwood_arquivo' in locals() else caminho_arquivo, mimetype='video/mp4', resumable=True)
+        media = MediaFileUpload(caminho_arquivo, mimetype='video/mp4', resumable=True)
         
         print(f"A ENVIAR PARA O DRIVE: '{nome_arquivo}'...", flush=True)
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id, name, webViewLink',
-            supportsAllDrives=True,
-            sendNotificationEmail=False
+            supportsAllDrives=True
         ).execute()
         
-        print(f"-> UPLOAD CONCLUÍDO COM SUCESSO!", flush=True)
-        print(f"-> Link direto do arquivo: {file.get('webViewLink')}", flush=True)
+        file_id = file.get('id')
+        print(f"-> UPLOAD CONCLUÍDO! ID: {file_id}", flush=True)
+
+        # FORÇAR PERMISSÃO DE LEITURA/ESCRITA PARA O SEU EMAIL PESSOAL
+        try:
+            permission = {
+                'type': 'user',
+                'role': 'writer',
+                'emailAddress': seu_email
+            }
+            service.permissions().create(
+                fileId=file_id,
+                body=permission,
+                fields='id',
+                supportsAllDrives=True
+            ).execute()
+            print(f"-> Permissão concedida com sucesso para {seu_email}!", flush=True)
+        except Exception as perm_err:
+            print(f"Aviso ao definir permissão do ficheiro: {perm_err}", flush=True)
+
+        print(f"-> LINK DIRETO DO VÍDEO: {file.get('webViewLink')}", flush=True)
     except Exception as e:
         print(f"CRÍTICO: Erro no upload para o Drive: {e}", flush=True)
         traceback.print_exc()
@@ -94,8 +113,8 @@ def loop_principal():
         print("CRÍTICO: Não foi possível conectar ao Drive. Encerrando execução.", flush=True)
         sys.exit(1)
         
-    # ID da pasta configurado automaticamente
     FOLDER_ID = "1mEKp9mdgKE-owpBIb032rLPojnxKlpaD" 
+    MEU_EMAIL = "achadinho.klebee@gmail.com"
         
     print("=== [5/6] ENTRANDO NO LOOP CONTINUO DO ROBÔ ===", flush=True)
     
@@ -106,7 +125,7 @@ def loop_principal():
         arquivo_video = f"shopee_video_{ciclo}.mp4"
         
         if gerar_video_ffmpeg(arquivo_video):
-            enviar_para_drive(drive_service, arquivo_video, FOLDER_ID)
+            enviar_para_drive(drive_service, arquivo_video, FOLDER_ID, MEU_EMAIL)
             if os.path.exists(arquivo_video):
                 os.remove(arquivo_video)
                 print(f"-> Vídeo local {arquivo_video} limpo com sucesso.", flush=True)
