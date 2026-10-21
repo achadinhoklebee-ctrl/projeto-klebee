@@ -1,4 +1,4 @@
-import json, logging, os, re, subprocess, tempfile
+import io, json, logging, os, re, subprocess, tempfile
 from pathlib import Path
 from flask import Flask, jsonify, render_template_string, request, send_file
 from werkzeug.utils import secure_filename
@@ -110,7 +110,7 @@ def render():
             if not out.exists() or out.stat().st_size<50000: raise RuntimeError("O arquivo final está ausente ou pequeno demais.")
             if not any(x.get("codec_type")=="video" for x in finalstreams) or not any(x.get("codec_type")=="audio" for x in finalstreams): raise RuntimeError("O MP4 final não contém vídeo e áudio válidos.")
             if finaldur<1 or finaldur>15.5: raise RuntimeError(f"Duração fora do esperado: {finaldur:.1f}s")
-            return send_file(out,mimetype="video/mp4",as_attachment=True,download_name="super_robo_klebee.mp4")
+            return send_file(io.BytesIO(out.read_bytes()),mimetype="video/mp4",as_attachment=True,download_name="super_robo_klebee.mp4")
         except Exception as e:
             log.exception("Falha na renderização")
             return jsonify(error="A renderização falhou; o vídeo não foi marcado como concluído.",detail=str(e)[-2000:]),500
