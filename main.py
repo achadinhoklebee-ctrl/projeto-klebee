@@ -31,7 +31,7 @@ def gerar_demo():
         # 2. Caminho do vídeo final
         video_final = os.path.join(TEMP_DIR, "video_final.mp4")
         
-        # 3. Renderizar com FFmpeg (criando um vídeo simples com cor de fundo e áudio)
+        # 3. Renderizar com FFmpeg (com o parâmetro -shortest para fechar no fim do áudio)
         cmd_ffmpeg = [
             "ffmpeg", "-y",
             "-f", "lavfi", "-i", "color=c=blue:s=1080x1920:r=30",
@@ -39,6 +39,7 @@ def gerar_demo():
             "-c:v", "libx264", "-t", "5",
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
+            "-shortest",
             video_final
         ]
         
