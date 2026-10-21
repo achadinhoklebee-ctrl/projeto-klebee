@@ -1,3 +1,23 @@
+import os
+import logging
+import subprocess
+from flask import Flask, jsonify, send_from_directory
+from gtts import gTTS
+
+# Configuração de logs
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Criação obrigatória da instância do Flask ANTES de qualquer rota
+app = Flask(__name__)
+
+# Diretório temporário para processamento
+TEMP_DIR = "/tmp"
+
+@app.route("/")
+def home():
+    return jsonify({"status": "online", "mensagem": "API de geração de vídeos ativa!"})
+
 @app.route("/gerar-demo")
 def gerar_demo():
     try:
@@ -59,3 +79,34 @@ def gerar_demo():
     except Exception as e:
         logger.error(f"[EXCEÇÃO CRÍTICA] {str(e)}")
         return jsonify({"status": "erro", "detalhe": str(e)}), 500
+
+def validar_mp4_com_ffprobe(caminho_arquivo):
+    if not os.path.exists(caminho_arquivo):
+        logger.error(f"[FFPROBE] Arquivo não encontrado: {caminho_arquivo}")
+        return False
+    
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1",
+        caminho_arquivo
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0 and len(res.stdout.strip()) > 0:
+            logger.info(f"[FFPROBE OK] Vídeo válido! Duração: {res.stdout.strip()}s")
+            return True
+        else:
+            logger.error(f"[FFPROBE ERRO] {res.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"[FFPROBE EXCEÇÃO] {str(e)}")
+        return False
+
+@app.route("/download/<filename>")
+def download_file(filename):
+    return send_from_directory(TEMP_DIR, filename, as_attachment=True)
+
+if __name__ == "__main__":
+    porta = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=porta)
