@@ -9,6 +9,7 @@ from gtts import gTTS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Inicialização obrigatória do Flask antes de qualquer rota
 app = Flask(__name__)
 
 TEMP_DIR = "/tmp"
@@ -22,29 +23,30 @@ def gerar_video():
     try:
         logger.info("[WORKER] Iniciando pipeline de produção de vídeo...")
         
-        # Caminhos dos arquivos temporários
         video_original = os.path.join(TEMP_DIR, "input_produto.mp4")
         audio_path = os.path.join(TEMP_DIR, "narracao.mp3")
         video_final = os.path.join(TEMP_DIR, "video_afiliado.mp4")
         
-        # Limpar arquivos anteriores se existirem
         for f in [video_original, audio_path, video_final]:
             if os.path.exists(f):
                 os.remove(f)
 
-        # 1. Obter vídeo de exemplo/produto (para fins de teste robusto do pipeline automatizado)
-        # Em produção, aqui entra a rotina de garimpagem automática combinada
-        logger.info("[BAIXANDO] Obtendo vídeo base do produto...")
+        logger.info("[BAIXANDO] Obtendo vídeo base do produto com cabeçalhos de navegação...")
         url_video_exemplo = "https://www.w3schools.com/html/mov_bbb.mp4"
-        urllib.request.urlretrieve(url_video_exemplo, video_original)
+        
+        # Requisição com User-Agent para contornar o bloqueio 403 Forbidden
+        req = urllib.request.Request(
+            url_video_exemplo,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with urllib.request.urlopen(req) as response, open(video_original, 'wb') as out_file:
+            out_file.write(response.read())
 
-        # 2. Gerar narração comercial em português
-        logger.info("[TTS] Sintetizando narração para afiliado...")
+        logger.info("[TTS] Sintetizando narração em português para afiliado...")
         texto_venda = "Olha esse achadinho incrível que eu acabei de encontrar! Corre para garantir o seu clicando no link da sacolinha."
         tts = gTTS(text=texto_venda, lang="pt")
         tts.save(audio_path)
 
-        # 3. Processar com FFmpeg: misturar narração, abaixar áudio original (ducking) e renderizar
         cmd_ffmpeg = [
             "ffmpeg", "-y",
             "-i", video_original,
@@ -59,14 +61,13 @@ def gerar_video():
             video_final
         ]
         
-        logger.info("[FFMPEG] Renderizando vídeo final de afiliado...")
+        logger.info("[FFMPEG] Renderizando vídeo final de afiliado com ducking de áudio...")
         res_ffmpeg = subprocess.run(cmd_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         if res_ffmpeg.returncode != 0:
             logger.error(f"[FFMPEG ERRO] {res_ffmpeg.stderr}")
             return jsonify({"status": "erro", "detalhe": res_ffmpeg.stderr[-500:]}), 500
 
-        # 4. Validar resultado com ffprobe
         if os.path.exists(video_final) and os.path.getsize(video_final) > 0:
             logger.info("[SUCESSO] Vídeo gerado e validado com sucesso!")
             return jsonify({
