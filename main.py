@@ -157,7 +157,7 @@ def gerar_video_real():
             logger.info("[%s] Vídeo recebido (%.2fs); streams=%s", job_id, original_duration, stream_kinds)
 
             logger.info("[%s] Gerando narração em português", job_id)
-            gTTS(text=narration, lang="pt-br").save(str(audio_path))
+            gTTS(text=narration, lang="pt").save(str(audio_path))
             speech_duration, speech_kinds = probe(audio_path)
             if "audio" not in speech_kinds:
                 raise RuntimeError("A narração gerada não contém áudio.")
