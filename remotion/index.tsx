@@ -6,6 +6,7 @@ type Cue = { text: string; startMs: number; endMs: number };
 type Props = {
   videoPath: string;
   narrationPath: string;
+  musicPath?: string;
   headline: string;
   middleHeadline: string;
   ctaHeadline: string;
@@ -60,7 +61,7 @@ const Karaoke: React.FC<{ segments: Cue[] }> = ({ segments }) => {
   );
 };
 
-const Klebee: React.FC<Props> = ({ videoPath, narrationPath, headline, middleHeadline, ctaHeadline, captionSegments }) => {
+const Klebee: React.FC<Props> = ({ videoPath, narrationPath, musicPath, headline, middleHeadline, ctaHeadline, captionSegments }) => {
   const { durationInFrames } = useVideoConfig();
   const middleStart = Math.round(durationInFrames * 0.36);
   const ctaStart = Math.round(durationInFrames * 0.72);
@@ -69,6 +70,17 @@ const Klebee: React.FC<Props> = ({ videoPath, narrationPath, headline, middleHea
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       <Video src={staticFile(videoPath)} style={{ width: "100%", height: "100%", objectFit: "cover" }} volume={0} />
       <Audio src={staticFile(narrationPath)} volume={1} />
+      {musicPath ? (
+        <Audio
+          src={staticFile(musicPath)}
+          volume={(frame) => {
+            const nowMs = (frame / 30) * 1000;
+            const speechActive = captionSegments.some((cue) => nowMs >= cue.startMs && nowMs < cue.endMs);
+            return speechActive ? 0.10 : 0.22;
+          }}
+          loop
+        />
+      ) : null}
       <Sequence from={0} durationInFrames={Math.min(Math.round(durationInFrames * 0.25), 105)}><Kicker text={headline} variant="hook" /></Sequence>
       <Sequence from={middleStart} durationInFrames={Math.max(1, Math.round(durationInFrames * 0.25))}><Kicker text={middleHeadline} variant="benefit" /></Sequence>
       <Sequence from={ctaStart} durationInFrames={ctaDuration}><Kicker text={ctaHeadline} variant="cta" /></Sequence>
@@ -87,6 +99,7 @@ const Root: React.FC = () => <Composition
   defaultProps={{
     videoPath: "klebee-render-inputs/klebee-input.mp4",
     narrationPath: "klebee-render-inputs/klebee-voice.mp3",
+    musicPath: undefined,
     headline: "FRESCOR PORTÁTIL",
     middleHeadline: "PRATICIDADE ONDE VOCÊ ESTIVER",
     ctaHeadline: "VEJA NA SHOPEE",
