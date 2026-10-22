@@ -48,7 +48,7 @@ jobs:
       - name: Check Remotion composition can load
         run: npx remotion compositions remotion/index.tsx
 
-      - name: Create synthetic 15-second render inputs
+      - name: Create synthetic 15-second inputs for technical smoke test only
         run: |
           mkdir -p test-output
           ffmpeg -y -f lavfi -i "testsrc2=size=540x960:rate=30" -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 15 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest test-output/source-test.mp4
@@ -64,7 +64,7 @@ jobs:
           ]
           JSON
 
-      - name: Render a real MP4 with Remotion
+      - name: Render synthetic fixture for engine validation (not a product deliverable)
         run: npm run render:klebee -- test-output/source-test.mp4 test-output/narration-test.mp3 test-output/captions.json test-output/klebee-remotion-smoke-test.mp4 "TESTE KLEBEE!" "BENEFÍCIO DE TESTE" "VEJA NA SHOPEE" test-output/music-test.mp3
 
       - name: Verify rendered MP4
@@ -74,10 +74,5 @@ jobs:
           ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 test-output/klebee-remotion-smoke-test.mp4
           ffprobe -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 test-output/klebee-remotion-smoke-test.mp4
 
-      - name: Upload rendered MP4 for inspection
-        uses: actions/upload-artifact@v4
-        with:
-          name: klebee-remotion-smoke-test
-          path: test-output/klebee-remotion-smoke-test.mp4
-          if-no-files-found: error
-          retention-days: 7
+      - name: Confirm output is only a technical fixture
+        run: echo "Synthetic render validated for engine compatibility only; never present this fixture as a product video."
