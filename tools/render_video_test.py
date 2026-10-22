@@ -24,7 +24,7 @@ def run(cmd: list[str]) -> str:
     return p.stdout.strip()
 
 
-def probe(path: Path) -> dict:
+def probe(path: Path, require_video: bool = True) -> dict:
     data = json.loads(run([
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration,size:stream=codec_type,codec_name,width,height,sample_rate,channels",
@@ -33,7 +33,7 @@ def probe(path: Path) -> dict:
     streams = data.get("streams", [])
     kinds = {s.get("codec_type") for s in streams}
     duration = float(data.get("format", {}).get("duration") or 0)
-    if duration <= 0 or "video" not in kinds or "audio" not in kinds:
+    if duration <= 0 or "audio" not in kinds or (require_video and "video" not in kinds):
         raise RuntimeError(f"Arquivo inválido: duração={duration}, fluxos={kinds}")
     return data
 
@@ -70,7 +70,7 @@ def main() -> int:
 
     # Validar a entrada antes de renderizar.
     source_info = probe(args.video)
-    voice_info = probe(args.voice)
+    voice_info = probe(args.voice, require_video=False)
     voice_duration = float(voice_info["format"]["duration"])
     final_duration = min(args.duration, voice_duration)
     if final_duration < 3:
