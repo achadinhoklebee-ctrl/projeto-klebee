@@ -16,14 +16,18 @@ export async function runJob(job) {
     throw new Error('O arquivo enviado não parece ser um vídeo válido.');
   }
 
-  const duration = Math.min(15, sourceDuration);
   const narration = job.narration.trim() || `${job.headline}. ${job.detail}. ${job.cta}.`;
   const audio = path.join(job.dir, 'voice.mp3');
   const srt = path.join(job.dir, 'captions.srt');
   await fs.writeFile(path.join(job.dir, 'narration.txt'), narration, 'utf8');
 
+  // edge-tts writes subtitle timestamps from the speech synthesis stream instead
+  // of distributing words uniformly across the total audio duration.
   await execFileAsync('edge-tts', [
-    '--voice', 'pt-BR-FranciscaNeural', '--text', narration, '--write-media', audio
+    '--voice', 'pt-BR-FranciscaNeural',
+    '--text', narration,
+    '--write-media', audio,
+    '--write-subtitles', srt
   ], { timeout: 90000 });
 
   const audioProbe = await execFileAsync('ffprobe', [
@@ -35,23 +39,17 @@ export async function runJob(job) {
     throw new Error('Não foi possível validar a duração da narração gerada.');
   }
 
-  const words = narration.trim().split(/\s+/u).filter(Boolean);
-  const chunkSize = 5;
-  const lines = [];
-  for (let i = 0; i < words.length; i += chunkSize) {
-    const start = voiceDuration * i / words.length;
-    const end = voiceDuration * Math.min(i + chunkSize, words.length) / words.length;
-    if (start >= duration) break;
-    const cueEnd = Math.min(duration, Math.max(start + 0.25, end));
-    lines.push(
-      String(lines.length / 4 + 1),
-      `${stamp(start)} --> ${stamp(cueEnd)}`,
-      words.slice(i, i + chunkSize).join(' '),
-      ''
-    );
+  // Preserve source length up to the 15-second Shopee target, but never cut the
+  // narration mid-sentence. A long narration is rejected with a useful message.
+  const duration = Math.min(15, sourceDuration);
+  if (voiceDuration > duration + 0.15) {
+    throw new Error(`A narração dura ${voiceDuration.toFixed(1)}s, mas o vídeo comporta ${duration.toFixed(1)}s. Encurte o texto para evitar corte de fala.`);
   }
-  if (lines.length === 0) throw new Error('Não foi possível criar as legendas.');
-  await fs.writeFile(srt, lines.join('\n') + '\n', 'utf8');
+
+  const subtitleText = await fs.readFile(srt, 'utf8');
+  if (!/-->/.test(subtitleText) || !subtitleText.trim()) {
+    throw new Error('O Edge TTS não gerou legendas temporizadas; o vídeo não será renderizado com sincronização estimada.');
+  }
 
   await renderVideo({ ...job, audio, srt, duration });
   const finalProbe = await execFileAsync('ffprobe', [
@@ -70,15 +68,7 @@ export async function runJob(job) {
     verification,
     narration,
     captionsFile: 'captions.srt',
+    captionTiming: 'edge-tts subtitle timestamps',
     musicUsed: Boolean(job.music)
   };
-}
-
-function stamp(seconds) {
-  const ms = Math.max(0, Math.round(seconds * 1000));
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const milli = ms % 1000;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`;
 }
