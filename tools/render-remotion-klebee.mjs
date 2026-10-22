@@ -3,7 +3,7 @@ import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { getCompositions, renderMedia } from "@remotion/renderer";
 const args=process.argv.slice(2);
-const videoPath=args[0], narrationPath=args[1], captionsPath=args[2], outputPath=args[3], headline=args[4]||"OLHA ESSE ACHADINHO!";
+const videoPath=args[0], narrationPath=args[1], captionsPath=args[2], outputPath=args[3], headline=args[4]||"FRESCOR PORTÁTIL", middleHeadline=args[5]||"PRATICIDADE ONDE VOCÊ ESTIVER", ctaHeadline=args[6]||"VEJA NA SHOPEE";
 if(!videoPath||!narrationPath||!captionsPath||!outputPath){console.error("Uso: npm run render:klebee -- video.mp4 voz.mp3 captions.json saida.mp4 \"HEADLINE\"");process.exit(2);}
 for(const f of [videoPath,narrationPath,captionsPath]) if(!fs.existsSync(f)) throw new Error("Arquivo não encontrado: "+f);
 const captionSegments=JSON.parse(fs.readFileSync(captionsPath,"utf8"));
@@ -15,7 +15,7 @@ const narrationAssetName="narration-"+process.pid+path.extname(narrationPath);
 fs.copyFileSync(path.resolve(videoPath),path.join(publicInputDir,videoAssetName));
 fs.copyFileSync(path.resolve(narrationPath),path.join(publicInputDir,narrationAssetName));
 const serveUrl=await bundle({entryPoint:path.resolve("remotion/index.tsx")});
-const inputProps={videoPath:"klebee-render-inputs/"+videoAssetName,narrationPath:"klebee-render-inputs/"+narrationAssetName,headline,captionSegments};
+const inputProps={videoPath:"klebee-render-inputs/"+videoAssetName,narrationPath:"klebee-render-inputs/"+narrationAssetName,headline,middleHeadline,ctaHeadline,captionSegments};
 const comps=await getCompositions(serveUrl,{inputProps});
 const comp=comps.find(x=>x.id==="KlebeeVideo"); if(!comp) throw new Error("Composição KlebeeVideo não encontrada.");
 const durationInFrames=Math.min(comp.durationInFrames,450);
