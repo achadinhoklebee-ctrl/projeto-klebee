@@ -8,8 +8,14 @@ if(!videoPath||!narrationPath||!captionsPath||!outputPath){console.error("Uso: n
 for(const f of [videoPath,narrationPath,captionsPath]) if(!fs.existsSync(f)) throw new Error("Arquivo não encontrado: "+f);
 const captionSegments=JSON.parse(fs.readFileSync(captionsPath,"utf8"));
 if(!Array.isArray(captionSegments)||captionSegments.some(x=>typeof x.text!=="string"||!Number.isFinite(x.startMs)||!Number.isFinite(x.endMs)||x.endMs<=x.startMs)) throw new Error("captions.json deve conter palavras com text/startMs/endMs válidos.");
+const publicInputDir=path.resolve("public","klebee-render-inputs");
+fs.mkdirSync(publicInputDir,{recursive:true});
+const videoAssetName="source-"+process.pid+path.extname(videoPath);
+const narrationAssetName="narration-"+process.pid+path.extname(narrationPath);
+fs.copyFileSync(path.resolve(videoPath),path.join(publicInputDir,videoAssetName));
+fs.copyFileSync(path.resolve(narrationPath),path.join(publicInputDir,narrationAssetName));
 const serveUrl=await bundle({entryPoint:path.resolve("remotion/index.tsx")});
-const inputProps={videoPath:path.resolve(videoPath),narrationPath:path.resolve(narrationPath),headline,captionSegments};
+const inputProps={videoPath:"klebee-render-inputs/"+videoAssetName,narrationPath:"klebee-render-inputs/"+narrationAssetName,headline,captionSegments};
 const comps=await getCompositions(serveUrl,{inputProps});
 const comp=comps.find(x=>x.id==="KlebeeVideo"); if(!comp) throw new Error("Composição KlebeeVideo não encontrada.");
 const durationInFrames=Math.min(comp.durationInFrames,450);
