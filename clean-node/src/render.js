@@ -17,8 +17,8 @@ export async function renderVideo(job) {
     'scale=1080:1920:force_original_aspect_ratio=decrease',
     'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
     'setsar=1',
-    `drawtext=text='${escapeText(job.headline)}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=76:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y='120+18*(1-min(t/0.35,1))':alpha='if(lt(t,0.35),t/0.35,1)':enable='lt(t,4)'`,
-    `drawtext=text='${escapeText(job.detail)}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=58:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y='230+14*(1-min((t-4)/0.35,1))':alpha='if(lt(t-4,0.35),(t-4)/0.35,1)':enable='between(t,4,8)'`,
+    `drawtext=text='${escapeText(job.headline)}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=76:fontcolor=white:borderw=5:bordercolor=black:x=(w-text_w)/2:y='120+18*(1-min(t/0.35\,1))':alpha='if(lt(t\,0.35)\,t/0.35\,1)':enable='lt(t,4)'`,
+    `drawtext=text='${escapeText(job.detail)}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=58:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y='230+14*(1-min((t-4)/0.35\,1))':alpha='if(lt(t-4\,0.35)\,(t-4)/0.35\,1)':enable='between(t,4,8)'`,
     `subtitles='${subtitlePath}':force_style='FontName=DejaVu Sans,FontSize=32,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=190'`
   ].join(',');
 
