@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Inicialização obrigatória do Flask antes de qualquer rota
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_UPLOAD_MB", "200")) * 1024 * 1024
 
 TEMP_DIR = "/tmp"
 
@@ -27,23 +28,29 @@ def home():
 @app.route("/gerar-video-real", methods=["GET", "POST"])
 def gerar_video_real():
     try:
-        # Suporte a parâmetros via GET (query string) ou JSON (POST)
+        # Aceita JSON/GET com URL e multipart/form-data com upload direto.
         if request.is_json:
-            data = request.get_json()
+            data = request.get_json() or {}
+        elif request.form:
+            data = request.form
         else:
             data = request.args
 
+        uploaded_video = request.files.get("video")
         url_video = data.get("url_video")
         headline = data.get("headline", "ACHADINHO IMPERDÍVEL 😱")
         texto_narração = data.get("texto", "Olha esse produto incrível que eu separei para você! Corre para garantir o seu clicando no link da sacolinha.")
 
-        if not url_video:
+        if not url_video and not uploaded_video:
             return jsonify({
                 "status": "erro",
-                "mensagem": "Parâmetro 'url_video' é obrigatório. Forneça o link de origem do vídeo do produto."
+                "mensagem": "Envie um arquivo no campo 'video' (multipart/form-data) ou informe 'url_video'."
             }), 400
+        if uploaded_video and not uploaded_video.filename:
+            return jsonify({"status": "erro", "mensagem": "O arquivo enviado não tem nome válido."}), 400
 
-        logger.info(f"[WORKER] Iniciando processamento para headline: '{headline}' | URL: {url_video}")
+        origem = "upload" if uploaded_video else "URL"
+        logger.info(f"[WORKER] Iniciando processamento para headline: '{headline}' | origem: {origem}")
 
         # Diretório exclusivo por requisição: impede colisões entre renderizações.
         task_id = str(uuid.uuid4())
@@ -55,20 +62,26 @@ def gerar_video_real():
         captions_path = os.path.join(task_dir, "captionSegments.json")
         video_final = os.path.join(task_dir, "video_final_afiliado.mp4")
 
-        # 1. Download do vídeo real do produto com cabeçalhos de segurança
-        logger.info("[BAIXANDO] Baixando mídia do produto...")
-        req = urllib.request.Request(
-            url_video,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        )
+        # 1. Recebe o arquivo enviado diretamente ou baixa a URL fornecida.
         try:
-            with urllib.request.urlopen(req) as response, open(video_original, 'wb') as out_file:
-                out_file.write(response.read())
+            if uploaded_video:
+                logger.info("[UPLOAD] Salvando vídeo enviado pelo usuário...")
+                uploaded_video.save(video_original)
+            else:
+                logger.info("[BAIXANDO] Baixando mídia do produto por URL...")
+                req = urllib.request.Request(
+                    url_video,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                )
+                with urllib.request.urlopen(req, timeout=60) as response, open(video_original, 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
+            if not os.path.isfile(video_original) or os.path.getsize(video_original) == 0:
+                raise ValueError("O vídeo recebido está vazio.")
         except Exception as e:
-            logger.error(f"[ERRO DOWNLOAD] Falha ao baixar o vídeo da URL fornecida: {str(e)}")
+            logger.error(f"[ERRO ENTRADA] Falha ao receber o vídeo: {str(e)}")
             return jsonify({
                 "status": "erro",
-                "mensagem": f"Não foi possível baixar o vídeo da URL fornecida. Detalhe: {str(e)}"
+                "mensagem": f"Não foi possível receber o vídeo. Detalhe: {str(e)}"
             }), 400
 
         # 2. Voz neural brasileira + marcações reais de cada palavra emitidas pelo Edge-TTS.
