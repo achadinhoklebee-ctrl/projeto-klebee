@@ -8,24 +8,40 @@ import { runJob } from './worker.js';
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 const ROOT = process.env.KLEBEE_WORK_DIR || '/tmp/klebee/jobs';
-await fs.mkdir(ROOT, { recursive: true });
+await fs.mkdir(path.join(ROOT, 'uploads'), { recursive: true });
 const upload = multer({
   dest: path.join(ROOT, 'uploads'),
-  limits: { fileSize: 250 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => cb(null, file.mimetype === 'video/mp4' || /\.mp4$/i.test(file.originalname))
+  limits: { fileSize: 250 * 1024 * 1024, files: 2 },
+  fileFilter: (_req, file, cb) => {
+    const name = file.originalname || '';
+    const allowedVideo = file.fieldname === 'video' && (/\.mp4$/i.test(name) || file.mimetype === 'video/mp4');
+    const allowedMusic = file.fieldname === 'music' && (/\.(mp3|wav|m4a|aac|ogg)$/i.test(name) || /^audio\//i.test(file.mimetype));
+    cb(null, allowedVideo || allowedMusic);
+  }
 });
 const jobs = new Map();
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'super-robo-klebee-node', mode: 'isolated-rebuild' }));
-app.post('/api/jobs', upload.single('video'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Envie um arquivo MP4 no campo video.' });
+app.post('/api/jobs', upload.fields([{ name: 'video', maxCount: 1 }, { name: 'music', maxCount: 1 }]), async (req, res) => {
+  const videoFile = req.files?.video?.[0];
+  const musicFile = req.files?.music?.[0];
+  if (!videoFile) {
+    if (musicFile) await fs.unlink(musicFile.path).catch(() => {});
+    return res.status(400).json({ error: 'Envie um arquivo MP4 no campo video.' });
+  }
+
   const id = nanoid(12);
   const dir = path.join(ROOT, id);
   await fs.mkdir(dir, { recursive: true });
   const input = path.join(dir, 'input.mp4');
-  await fs.rename(req.file.path, input);
+  await fs.rename(videoFile.path, input);
+  let music;
+  if (musicFile) {
+    music = path.join(dir, 'music' + path.extname(musicFile.originalname || '.mp3').toLowerCase());
+    await fs.rename(musicFile.path, music);
+  }
   const config = {
-    id, dir, input,
+    id, dir, input, music,
     headline: String(req.body.headline || 'Olha essa novidade!').slice(0, 90),
     detail: String(req.body.detail || 'Praticidade para o seu dia a dia').slice(0, 120),
     narration: String(req.body.narration || '').slice(0, 1200),
