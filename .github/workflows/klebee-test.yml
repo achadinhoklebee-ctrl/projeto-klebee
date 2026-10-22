@@ -1,0 +1,91 @@
+name: Klebee MP4 pipeline test
+
+on:
+  push:
+    branches:
+      - rebuild/klebee-v2
+  workflow_dispatch:
+
+jobs:
+  test-mp4-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check Python syntax
+        run: python -m py_compile main.py
+      - name: Execute upload-render-download smoke test
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import tempfile
+          from pathlib import Path
+
+          import main
+
+          # Keep the test independent from external TTS network availability.
+          class FakeTTS:
+              def __init__(self, text, lang):
+                  assert lang == "pt"
+                  self.text = text
+
+              def save(self, path):
+                  subprocess.run([
+                      "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                      "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                      "-c:a", "libmp3lame", path
+                  ], check=True)
+
+          main.gTTS = FakeTTS
+
+          with tempfile.TemporaryDirectory() as temp:
+              temp = Path(temp)
+              source = temp / "input.mp4"
+              subprocess.run([
+                  "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                  "-f", "lavfi", "-i", "testsrc=size=360x640:rate=24:duration=4",
+                  "-f", "lavfi", "-i", "sine=frequency=220:duration=4",
+                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                  str(source)
+              ], check=True)
+
+              main.OUTPUT_DIR = temp / "outputs"
+              main.OUTPUT_DIR.mkdir()
+              client = main.app.test_client()
+              with source.open("rb") as video:
+                  response = client.post(
+                      "/gerar-video-real",
+                      data={
+                          "video": (video, "teste.mp4"),
+                          "headline": "TESTE KLEBEE",
+                          "texto": "Teste de narração em português para validar o vídeo."
+                      },
+                      content_type="multipart/form-data"
+                  )
+
+              assert response.status_code == 200, response.get_data(as_text=True)
+              data = response.get_json()
+              assert data["status"] == "sucesso", data
+              download = client.get(data["download"].replace("http://localhost", ""))
+              assert download.status_code == 200, download.status_code
+              output = temp / "final.mp4"
+              output.write_bytes(download.data)
+              probe = subprocess.run([
+                  "ffprobe", "-v", "error", "-show_entries",
+                  "stream=codec_type", "-of", "csv=p=0", str(output)
+              ], capture_output=True, text=True, check=True)
+              assert "video" in probe.stdout and "audio" in probe.stdout, probe.stdout
+              assert output.stat().st_size > 1000
+              print("PASS: upload -> render -> validate -> download")
+              print(f"Final MP4 size: {output.stat().st_size} bytes")
+          PY
