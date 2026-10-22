@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Audio, Composition, Sequence, Video, registerRoot, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Composition, Sequence, Video, registerRoot, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { createTikTokStyleCaptions } from "@remotion/captions";
 type Cue = {text:string;startMs:number;endMs:number};
 type Props = {videoPath:string;narrationPath:string;headline:string;captionSegments:Cue[]};
@@ -23,7 +23,7 @@ const Karaoke:React.FC<{segments:Cue[]}> = ({segments}) => {
 };
 const Klebee:React.FC<Props> = ({videoPath,narrationPath,headline,captionSegments}) => {
  const {durationInFrames}=useVideoConfig();
- return <AbsoluteFill style={{backgroundColor:"#000"}}><Video src={videoPath} style={{width:"100%",height:"100%",objectFit:"cover"}} volume={0.16}/><Audio src={narrationPath} volume={1}/><Sequence from={0} durationInFrames={Math.min(durationInFrames,96)}><Headline text={headline}/></Sequence><Karaoke segments={captionSegments}/></AbsoluteFill>;
+ return <AbsoluteFill style={{backgroundColor:"#000"}}><Video src={staticFile(videoPath)} style={{width:"100%",height:"100%",objectFit:"cover"}} volume={0.16}/><Audio src={staticFile(narrationPath)} volume={1}/><Sequence from={0} durationInFrames={Math.min(durationInFrames,96)}><Headline text={headline}/></Sequence><Karaoke segments={captionSegments}/></AbsoluteFill>;
 };
-const Root:React.FC=()=> <Composition id="KlebeeVideo" component={Klebee} durationInFrames={450} fps={30} width={1080} height={1920} defaultProps={{videoPath:"/tmp/klebee-input.mp4",narrationPath:"/tmp/klebee-voice.mp3",headline:"OLHA ESSE ACHADINHO!",captionSegments:[]}}/>;
+const Root:React.FC=()=> <Composition id="KlebeeVideo" component={Klebee} durationInFrames={450} fps={30} width={1080} height={1920} defaultProps={{videoPath:"klebee-render-inputs/klebee-input.mp4",narrationPath:"klebee-render-inputs/klebee-voice.mp3",headline:"OLHA ESSE ACHADINHO!",captionSegments:[]}}/>;
 registerRoot(Root);
