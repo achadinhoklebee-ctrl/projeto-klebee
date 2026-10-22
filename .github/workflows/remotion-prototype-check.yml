@@ -21,11 +21,46 @@ jobs:
     steps:
       - name: Checkout isolated test branch
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Install dependencies
         run: npm install
+
       - name: Check Remotion composition can load
         run: npx remotion compositions remotion/index.tsx
+
+      - name: Create synthetic 15-second render inputs
+        run: |
+          mkdir -p test-output
+          ffmpeg -y -f lavfi -i "testsrc2=size=540x960:rate=30" -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 15 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest test-output/source-test.mp4
+          ffmpeg -y -f lavfi -i "sine=frequency=880:sample_rate=44100" -t 15 -c:a libmp3lame -q:a 5 test-output/narration-test.mp3
+          cat > test-output/captions.json <<'JSON'
+          [
+            {"text":"TESTE","startMs":0,"endMs":900},
+            {"text":"DE","startMs":900,"endMs":1200},
+            {"text":"RENDERIZAÇÃO","startMs":1200,"endMs":2600},
+            {"text":"KLEBEE","startMs":2600,"endMs":3800},
+            {"text":"APROVADO","startMs":3800,"endMs":5200}
+          ]
+          JSON
+
+      - name: Render a real MP4 with Remotion
+        run: npm run render:klebee -- test-output/source-test.mp4 test-output/narration-test.mp3 test-output/captions.json test-output/klebee-remotion-smoke-test.mp4 "TESTE KLEBEE!"
+
+      - name: Verify rendered MP4
+        run: |
+          test -s test-output/klebee-remotion-smoke-test.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 test-output/klebee-remotion-smoke-test.mp4
+          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 test-output/klebee-remotion-smoke-test.mp4
+
+      - name: Upload rendered MP4 for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: klebee-remotion-smoke-test
+          path: test-output/klebee-remotion-smoke-test.mp4
+          if-no-files-found: error
+          retention-days: 7
