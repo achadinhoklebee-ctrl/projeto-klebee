@@ -27,17 +27,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Set up FFmpeg without apt package installation
-        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Install portable FFmpeg binaries
+        run: |
+          npm install --no-save ffmpeg-static ffprobe-static
+          echo "$(dirname "$(node -p \"require('ffmpeg-static')\")")" >> "$GITHUB_PATH"
+          echo "$(dirname "$(node -p \"require('ffprobe-static').path\")")" >> "$GITHUB_PATH"
+
       - name: Verify FFmpeg installation
         run: |
           command -v ffmpeg
           command -v ffprobe
           ffmpeg -version
           ffprobe -version
-
-      - name: Install dependencies
-        run: npm install
 
       - name: Check Remotion composition can load
         run: npx remotion compositions remotion/index.tsx
