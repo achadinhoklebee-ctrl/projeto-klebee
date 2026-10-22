@@ -1,0 +1,32 @@
+name: Remotion prototype check
+
+on:
+  push:
+    branches:
+      - test/remotion-engine-prototype
+    paths:
+      - 'package.json'
+      - 'remotion/**'
+      - 'tools/render-remotion-klebee.mjs'
+      - '.github/workflows/remotion-prototype-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-remotion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Check Remotion composition can load
+        run: npx remotion compositions remotion/index.tsx
