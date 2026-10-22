@@ -1,0 +1,31 @@
+name: Klebee engine validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/engine-audio-visual-v1]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Python syntax
+        run: python -m py_compile main.py klebee_tts.py
+
+      - name: Validate Node syntax
+        run: node --check tools/render-remotion-klebee.mjs
+
+      - name: Build production Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: klebee-engine:ci
