@@ -1,0 +1,31 @@
+name: clean-node-check
+on:
+  push:
+    branches:
+      - rebuild/nodejs-clean-core
+    paths:
+      - "clean-node/**"
+      - ".github/workflows/clean-node-check.yml"
+  pull_request:
+    paths:
+      - "clean-node/**"
+      - ".github/workflows/clean-node-check.yml"
+jobs:
+  syntax-and-container:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clean-node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: clean-node/package.json
+      - name: Install dependencies
+        run: npm install --package-lock=false
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Build container
+        run: docker build -t super-robo-klebee-clean-node .
