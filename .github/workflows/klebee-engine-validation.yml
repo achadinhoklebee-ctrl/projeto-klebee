@@ -26,7 +26,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
 
       - name: Validate Python syntax
         run: python -m py_compile main.py klebee_tts.py
@@ -40,7 +39,7 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       - name: Install Remotion dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Remotion browser
         run: npx remotion browser ensure
