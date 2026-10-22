@@ -44,7 +44,7 @@ const Karaoke: React.FC<{ segments: Cue[] }> = ({ segments }) => {
 
   // Remotion expects a leading space on tokens after the first word. Normalize it
   // here so page splitting and wrapping remain predictable even with older JSON.
-  const normalized = segments.map((s, i) => ({ text: i === 0 || /^\\s/.test(s.text) ? s.text : " " + s.text, startMs: s.startMs, durationMs: Math.max(1, s.endMs - s.startMs) }));
+  const normalized = segments.map((s, i) => ({ text: i === 0 || /^\s/.test(s.text) ? s.text : " " + s.text, startMs: s.startMs, durationMs: Math.max(1, s.endMs - s.startMs) }));
   const { pages } = createTikTokStyleCaptions({ captions: normalized as any, combineTokensWithinMilliseconds: 900, breakOnSilenceAfterMilliseconds: 420 });
   const line = (pages as any[]).find((p) => now >= p.startMs && now < p.startMs + (p.durationMs ?? Infinity));
   if (!line) return null;
