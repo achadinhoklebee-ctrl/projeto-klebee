@@ -34,7 +34,7 @@ def run_command(command):
     return result.stdout.strip()
 
 
-def probe(path):
+def probe(path, require_video=True):
     raw = run_command([
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration:stream=codec_type", "-of", "json", str(path)
@@ -43,7 +43,9 @@ def probe(path):
     data = json.loads(raw)
     duration = float(data.get("format", {}).get("duration") or 0)
     kinds = {s.get("codec_type") for s in data.get("streams", [])}
-    if duration <= 0 or "video" not in kinds:
+    if duration <= 0:
+        raise ValueError("O arquivo de mídia recebido não tem duração válida.")
+    if require_video and "video" not in kinds:
         raise ValueError("O arquivo recebido não contém um vídeo válido.")
     return duration, kinds
 
@@ -158,7 +160,7 @@ def gerar_video_real():
 
             logger.info("[%s] Gerando narração em português", job_id)
             gTTS(text=narration, lang="pt").save(str(audio_path))
-            speech_duration, speech_kinds = probe(audio_path)
+            speech_duration, speech_kinds = probe(audio_path, require_video=False)
             if "audio" not in speech_kinds:
                 raise RuntimeError("A narração gerada não contém áudio.")
 
