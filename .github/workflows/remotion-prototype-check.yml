@@ -17,7 +17,7 @@ permissions:
 jobs:
   validate-remotion:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout isolated test branch
         uses: actions/checkout@v4
@@ -27,10 +27,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install FFmpeg
+      - name: Set up FFmpeg without apt package installation
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Verify FFmpeg installation
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
           ffmpeg -version
           ffprobe -version
 
