@@ -35,21 +35,23 @@ export async function runJob(job) {
     throw new Error('Não foi possível validar a duração da narração gerada.');
   }
 
-  const words = narration.split(/\\s+/).filter(Boolean);
+  const words = narration.trim().split(/\s+/u).filter(Boolean);
   const chunkSize = 5;
   const lines = [];
   for (let i = 0; i < words.length; i += chunkSize) {
     const start = voiceDuration * i / words.length;
     const end = voiceDuration * Math.min(i + chunkSize, words.length) / words.length;
     if (start >= duration) break;
+    const cueEnd = Math.min(duration, Math.max(start + 0.25, end));
     lines.push(
-      String(lines.length + 1),
-      `${stamp(start)} --> ${stamp(Math.min(duration, Math.max(start + 0.25, end)))}`,
+      String(lines.length / 4 + 1),
+      `${stamp(start)} --> ${stamp(cueEnd)}`,
       words.slice(i, i + chunkSize).join(' '),
       ''
     );
   }
-  await fs.writeFile(srt, lines.join('\\n'), 'utf8');
+  if (lines.length === 0) throw new Error('Não foi possível criar as legendas.');
+  await fs.writeFile(srt, lines.join('\n') + '\n', 'utf8');
 
   await renderVideo({ ...job, audio, srt, duration });
   const finalProbe = await execFileAsync('ffprobe', [
@@ -67,7 +69,8 @@ export async function runJob(job) {
     outputDurationSeconds: Number(verification.format?.duration || duration),
     verification,
     narration,
-    captionsFile: 'captions.srt'
+    captionsFile: 'captions.srt',
+    musicUsed: Boolean(job.music)
   };
 }
 
