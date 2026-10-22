@@ -164,7 +164,9 @@ def gerar_video_real():
             "status": "sucesso",
             "mensagem": "Vídeo real de produto gerado, legendado e validado com sucesso!",
             "tamanho_bytes": tamanho_bytes,
-            "download": f"/download/{task_id}/video_final_afiliado.mp4",\n            "caption_segments": caption_segments,\n            "task_id": task_id
+            "download": f"/download/{task_id}/video_final_afiliado.mp4",
+            "caption_segments": caption_segments,
+            "task_id": task_id
         })
 
     except Exception as e:
