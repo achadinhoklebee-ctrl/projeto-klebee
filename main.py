@@ -74,28 +74,18 @@ def timestamp(seconds):
 
 
 def make_srt(text, duration, output_path):
-    # Caption blocks are timed over the generated speech duration; this is not
-    # forced-alignment/word-level transcription.
-    words = text.split()
-    if not words:
-        words = [" "]
-    groups = []
-    current = []
-    for word in words:
-        current.append(word)
-        if len(current) >= 7 or len(" ".join(current)) >= 38:
-            groups.append(" ".join(current))
-            current = []
-    if current:
-        groups.append(" ".join(current))
-    total_chars = sum(max(1, len(g)) for g in groups)
+    # Kinetic word-by-word captions. Timing is estimated from text length;
+    # true forced alignment still requires speech recognition/alignment.
+    words = text.split() or [" "]
+    weights = [max(1, len(w.strip(".,!?;:"))) for w in words]
+    total = sum(weights)
     cursor = 0.0
     lines = []
-    for index, group in enumerate(groups, start=1):
-        share = duration * max(1, len(group)) / total_chars
-        start = cursor
-        end = duration if index == len(groups) else min(duration, cursor + share)
-        lines.append(f"{index}\n{timestamp(start)} --> {timestamp(end)}\n{group}")
+    for index, (word, weight) in enumerate(zip(words, weights), start=1):
+        share = duration * weight / total
+        end = duration if index == len(words) else min(duration, cursor + share)
+        # Short captions create a more energetic, word-pop effect.
+        lines.append(f"{index}\n{timestamp(cursor)} --> {timestamp(end)}\n{word}")
         cursor = end
     output_path.write_text("\n\n".join(lines) + "\n", encoding="utf-8")
 
@@ -176,7 +166,9 @@ def gerar_video_real():
                 "crop=1080:1920,"
                 "drawbox=x=0:y=45:w=iw:h=150:color=black@0.60:t=fill,"
                 f"drawtext=text='{escape_drawtext(headline)}':fontcolor=yellow:"
-                "fontsize=48:x=(w-text_w)/2:y=95,"
+                "fontsize=48:x=(w-text_w)/2:y=95:"
+                "alpha='if(lt(t,0.45),t/0.45,1)':"
+                "shadowcolor=black@0.9:shadowx=3:shadowy=3,"
                 f"{subtitle_filter}"
             )
 
@@ -211,7 +203,7 @@ def gerar_video_real():
                 "job_id": job_id,
                 "duracao_segundos": round(final_duration, 2),
                 "tamanho_bytes": final_path.stat().st_size,
-                "observacao": "As legendas são distribuídas ao longo da duração da narração; sincronização palavra a palavra ainda não foi implementada.",
+                "observacao": "Legendas em efeito palavra-a-palavra com tempo estimado pela extensão do texto; ainda não é alinhamento real por reconhecimento de fala. Headline com entrada em fade. Música de fundo ainda não incorporada nesta versão.",
                 "download": url_for("download_file", filename=final_name, _external=True)
             }), 200
 
