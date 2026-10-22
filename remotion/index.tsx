@@ -62,6 +62,7 @@ const Karaoke: React.FC<{ segments: Cue[] }> = ({ segments }) => {
 };
 
 const Klebee: React.FC<Props> = ({ videoPath, narrationPath, musicPath, headline, middleHeadline, ctaHeadline, captionSegments }) => {
+  const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const middleStart = Math.round(durationInFrames * 0.36);
   const ctaStart = Math.round(durationInFrames * 0.72);
