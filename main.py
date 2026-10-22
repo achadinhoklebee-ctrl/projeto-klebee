@@ -37,6 +37,7 @@ def gerar_video_real():
             data = request.args
 
         uploaded_video = request.files.get("video")
+        uploaded_music = request.files.get("music")
         url_video = data.get("url_video")
         headline = data.get("headline", "ACHADINHO IMPERDÍVEL 😱")
         texto_narração = data.get("texto", "Olha esse produto incrível que eu separei para você! Corre para garantir o seu clicando no link da sacolinha.")
@@ -61,6 +62,7 @@ def gerar_video_real():
         legenda_path = os.path.join(task_dir, "legenda.srt")
         captions_path = os.path.join(task_dir, "captionSegments.json")
         video_final = os.path.join(task_dir, "video_final_afiliado.mp4")
+        music_path = os.path.join(task_dir, "musica_fundo.mp3") if uploaded_music and uploaded_music.filename else None
 
         # 1. Recebe o arquivo enviado diretamente ou baixa a URL fornecida.
         try:
@@ -83,6 +85,12 @@ def gerar_video_real():
                 "status": "erro",
                 "mensagem": f"Não foi possível receber o vídeo. Detalhe: {str(e)}"
             }), 400
+
+        # Trilha opcional enviada pelo usuário; sem trilha fornecida, não fingir que há música.
+        if music_path:
+            uploaded_music.save(music_path)
+            if not os.path.isfile(music_path) or os.path.getsize(music_path) == 0:
+                raise ValueError("O arquivo de música enviado está vazio.")
 
         # 2. Voz neural brasileira + marcações reais de cada palavra emitidas pelo Edge-TTS.
         logger.info("[TTS] Gerando narração e timestamps WordBoundary...")
@@ -113,7 +121,8 @@ def gerar_video_real():
             video_original, audio_path, captions_path, video_final,
             headline,
             data.get("middle_headline", "PRATICIDADE NO DIA A DIA"),
-            data.get("cta_headline", "VEJA NA SHOPEE")
+            data.get("cta_headline", "VEJA NA SHOPEE"),
+            music_path or ""
         ]
         logger.info("[REMOTION] Renderizando vídeo vertical com headlines animadas e legendas sincronizadas...")
         res_render = subprocess.run(
@@ -158,6 +167,7 @@ def gerar_video_real():
             "tamanho_bytes": tamanho_bytes,
             "download": f"/download/{task_id}/video_final_afiliado.mp4",
             "caption_segments": caption_segments,
+            "music_included": bool(music_path),
             "task_id": task_id
         })
 
