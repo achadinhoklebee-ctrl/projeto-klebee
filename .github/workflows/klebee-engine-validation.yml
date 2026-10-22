@@ -12,16 +12,76 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
 
       - name: Validate Python syntax
         run: python -m py_compile main.py klebee_tts.py
 
       - name: Validate Node syntax
         run: node --check tools/render-remotion-klebee.mjs
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Remotion dependencies
+        run: npm ci
+
+      - name: Install Remotion browser
+        run: npx remotion browser ensure
+
+      - name: Generate synthetic render-test inputs
+        run: |
+          mkdir -p .ci-test
+          ffmpeg -y -f lavfi -i "color=c=orange:s=360x640:r=30:d=3" -f lavfi -i "sine=frequency=440:duration=3" -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac .ci-test/source.mp4
+          ffmpeg -y -f lavfi -i "sine=frequency=660:duration=3" -c:a libmp3lame .ci-test/narration.mp3
+          cat > .ci-test/captions.json <<'JSON'
+          [
+            {"text":"Teste","startMs":0,"endMs":500},
+            {"text":"real","startMs":500,"endMs":1000},
+            {"text":"Klebee","startMs":1000,"endMs":1800}
+          ]
+          JSON
+
+      - name: Render an actual MP4 with Remotion
+        run: |
+          npm run render:klebee -- .ci-test/source.mp4 .ci-test/narration.mp3 .ci-test/captions.json .ci-test/output.mp4 "TESTE KLEBEE" "LEGENDA SINCRONIZADA" "VALIDAÇÃO CONCLUÍDA"
+          test -s .ci-test/output.mp4
+          ffprobe -v error -show_entries stream=codec_type,codec_name,width,height -show_entries format=duration -of json .ci-test/output.mp4 > .ci-test/probe.json
+          cat .ci-test/probe.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path(".ci-test/probe.json").read_text())
+          streams = p.get("streams", [])
+          assert any(s.get("codec_type") == "video" and s.get("codec_name") == "h264" for s in streams), "MP4 sem vídeo H.264"
+          assert any(s.get("codec_type") == "audio" for s in streams), "MP4 sem áudio"
+          assert float(p["format"]["duration"]) > 0, "Duração inválida"
+          print("Smoke test de renderização MP4 aprovado.")
+          PY
+
+      - name: Upload rendered smoke-test MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: klebee-render-smoke-test
+          path: .ci-test/output.mp4
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build production Docker image
         uses: docker/build-push-action@v6
