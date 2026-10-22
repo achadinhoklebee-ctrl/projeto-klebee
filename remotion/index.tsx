@@ -50,8 +50,8 @@ const Karaoke: React.FC<{ segments: Cue[] }> = ({ segments }) => {
   if (!line) return null;
 
   return (
-    <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center", paddingLeft: 84, paddingRight: 84, paddingBottom: 245, pointerEvents: "none" }}>
-      <div style={{ width: "100%", maxWidth: 900, boxSizing: "border-box", padding: "20px 24px", borderRadius: 24, background: "rgba(5, 8, 14, .84)", border: "2px solid rgba(255,255,255,.88)", boxShadow: "0 8px 26px rgba(0,0,0,.38)", textAlign: "center", fontFamily: "Arial Black, Arial, sans-serif", fontSize: 48, fontWeight: 900, lineHeight: 1.18, textTransform: "uppercase", overflowWrap: "anywhere", wordBreak: "normal" }}>
+    <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center", paddingLeft: 110, paddingRight: 110, paddingBottom: 145, pointerEvents: "none" }}>
+      <div style={{ width: "100%", maxWidth: 820, boxSizing: "border-box", padding: "12px 18px", borderRadius: 18, background: "rgba(5, 8, 14, .84)", border: "2px solid rgba(255,255,255,.88)", boxShadow: "0 8px 26px rgba(0,0,0,.38)", textAlign: "center", fontFamily: "Arial Black, Arial, sans-serif", fontSize: 34, fontWeight: 900, lineHeight: 1.12, textTransform: "uppercase", overflowWrap: "anywhere", wordBreak: "normal" }}>
         {line.tokens.map((token: any, i: number) => {
           const active = now >= (token.fromMs ?? 0) && now < (token.toMs ?? Infinity);
           return <span key={i} style={{ display: "inline", color: active ? "#FFE45E" : "#FFFFFF", WebkitTextStroke: "1px rgba(0,0,0,.65)", textShadow: active ? "0 0 12px rgba(255,228,94,.5)" : "0 2px 3px rgba(0,0,0,.6)", transition: "color 100ms linear" }}>{token.text}</span>;
@@ -76,8 +76,8 @@ const Klebee: React.FC<Props> = ({ videoPath, narrationPath, musicPath, headline
           src={staticFile(musicPath)}
           volume={(frame) => {
             const nowMs = (frame / 30) * 1000;
-            const speechActive = captionSegments.some((cue) => nowMs >= cue.startMs && nowMs < cue.endMs);
-            return speechActive ? 0.10 : 0.22;
+            const speechActive = captionSegments.some((cue) => nowMs >= cue.startMs - 180 && nowMs < cue.endMs + 180);
+            return speechActive ? 0.07 : 0.16;
           }}
           loop
         />
