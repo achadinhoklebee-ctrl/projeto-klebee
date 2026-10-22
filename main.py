@@ -93,47 +93,26 @@ def gerar_video_real():
         with open(legenda_path, "w", encoding="utf-8") as f_srt:
             f_srt.write("\n".join(srt_blocks))
 
-        # 4. Construção do filtro complexo do FFmpeg:
-        # - Redimensionamento e corte para formato vertical 9:16 (1080x1920)
-        # - Inclusão de faixa preta semi-transparente e texto da Headline no topo
-        # - Inclusão de legendas dinâmicas na parte inferior
-        # - Ducking de áudio (redução do som original para 20% e áudio da narração em 100%)
-        
-        # Nota: O filtro subtitles do FFmpeg exige caminhos normalizados sem caracteres especiais complexos no path
-        subtitles_filter = f"subtitles={legenda_path}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Alignment=2'"
-        
-        filtro_complexo = (
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-            f"drawbox=y=60:w=1080:h=140:color=black@0.6:t=fill,"
-            f"drawtext=text='{headline}':fontcolor=yellow:fontsize=50:x=(w-text_w)/2:y=100,"
-            f"{subtitles_filter}[v_out];"
-            "[0:a]volume=0.2[a1];[1:a]volume=1.0[a2];[a1][a2]amix=inputs=2:duration=first[aout]"
-        )
-
-        cmd_ffmpeg = [
-            "ffmpeg", "-y",
-            "-i", video_original,
-            "-i", audio_path,
-            "-filter_complex", filtro_complexo,
-            "-map", "[v_out]",
-            "-map", "[aout]",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-t", "15",  # Duração alvo de 15 segundos
-            "-shortest",
-            video_final
+        # 4. Renderização pela composição Remotion (headlines animadas + legendas palavra a palavra).
+        # O script de renderização usa os timestamps reais gerados pelo Edge-TTS.
+        render_cmd = [
+            "npm", "run", "render:klebee", "--",
+            video_original, audio_path, captions_path, video_final,
+            headline,
+            data.get("middle_headline", "PRATICIDADE NO DIA A DIA"),
+            data.get("cta_headline", "VEJA NA SHOPEE")
         ]
-
-        logger.info("[FFMPEG] Renderizando vídeo vertical com headline, legendas e ducking...")
-        res_ffmpeg = subprocess.run(cmd_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if res_ffmpeg.returncode != 0:
-            logger.error(f"[FFMPEG ERRO] {res_ffmpeg.stderr}")
+        logger.info("[REMOTION] Renderizando vídeo vertical com headlines animadas e legendas sincronizadas...")
+        res_render = subprocess.run(
+            render_cmd, cwd=os.path.dirname(os.path.abspath(__file__)),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=900
+        )
+        if res_render.returncode != 0:
+            logger.error("[REMOTION ERRO] %s\n%s", res_render.stdout[-3000:], res_render.stderr[-5000:])
             return jsonify({
                 "status": "erro",
-                "mensagem": "Falha na renderização do FFmpeg",
-                "detalhe": res_ffmpeg.stderr[-600:]
+                "mensagem": "Falha na renderização Remotion",
+                "detalhe": (res_render.stderr or res_render.stdout)[-1500:]
             }), 500
 
         # 5. Validação rigorosa do arquivo gerado via ffprobe e checagens estruturais
