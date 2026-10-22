@@ -88,10 +88,10 @@ def gerar_video_real():
         srt_blocks = []
         for index, cue in enumerate(caption_segments, start=1):
             srt_blocks.append(
-                f"{index}\\n{srt_time(cue['startMs'])} --> {srt_time(cue['endMs'])}\\n{cue['text']}\\n"
+                f"{index}\n{srt_time(cue['startMs'])} --> {srt_time(cue['endMs'])}\n{cue['text']}\n"
             )
         with open(legenda_path, "w", encoding="utf-8") as f_srt:
-            f_srt.write("\\n".join(srt_blocks))
+            f_srt.write("\n".join(srt_blocks))
 
         # 4. Construção do filtro complexo do FFmpeg:
         # - Redimensionamento e corte para formato vertical 9:16 (1080x1920)
