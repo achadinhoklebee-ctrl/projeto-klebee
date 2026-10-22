@@ -1,172 +1,237 @@
 import os
+import re
+import uuid
+import shutil
 import logging
+import tempfile
 import subprocess
-import urllib.request
-from flask import Flask, jsonify, request, send_from_directory
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+from flask import Flask, jsonify, request, send_from_directory, url_for
 from gtts import gTTS
 
-# Configuração de logs
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Inicialização obrigatória do Flask antes de qualquer rota
+logger = logging.getLogger("klebee")
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
 
-TEMP_DIR = "/tmp"
+OUTPUT_DIR = Path(os.environ.get("KLEBEE_OUTPUT_DIR", "/tmp/klebee_outputs"))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-@app.route("/")
+DEFAULT_TEXT = (
+    "Olha esse produto incrível que eu separei para você! "
+    "Corre para garantir o seu clicando no link da sacolinha."
+)
+DEFAULT_HEADLINE = "ACHADINHO IMPERDÍVEL"
+
+
+def run_command(command):
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr[-2500:] or "Comando de mídia falhou.")
+    return result.stdout.strip()
+
+
+def probe(path):
+    raw = run_command([
+        "ffprobe", "-v", "error", "-show_entries",
+        "format=duration:stream=codec_type", "-of", "json", str(path)
+    ])
+    import json
+    data = json.loads(raw)
+    duration = float(data.get("format", {}).get("duration") or 0)
+    kinds = {s.get("codec_type") for s in data.get("streams", [])}
+    if duration <= 0 or "video" not in kinds:
+        raise ValueError("O arquivo recebido não contém um vídeo válido.")
+    return duration, kinds
+
+
+def ffmpeg_escape_path(path):
+    # Escape path characters for FFmpeg's subtitles filter argument.
+    value = str(path).replace("\\", "/")
+    value = value.replace(":", r"\\:").replace("'", r"\\'")
+    value = value.replace(",", r"\\,").replace("[", r"\\[").replace("]", r"\\]")
+    return value
+
+
+def escape_drawtext(value):
+    # Escape FFmpeg drawtext special characters.
+    return (str(value).replace("\\", r"\\\\").replace(":", r"\\:")
+            .replace("'", r"\\'").replace("%", r"\\%")
+            .replace(",", r"\\,").replace("[", r"\\[").replace("]", r"\\]"))
+
+
+def timestamp(seconds):
+    ms = int(max(0, seconds) * 1000)
+    hours, rem = divmod(ms, 3600000)
+    minutes, rem = divmod(rem, 60000)
+    secs, millis = divmod(rem, 1000)
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def make_srt(text, duration, output_path):
+    # Caption blocks are timed over the generated speech duration; this is not
+    # forced-alignment/word-level transcription.
+    words = text.split()
+    if not words:
+        words = [" "]
+    groups = []
+    current = []
+    for word in words:
+        current.append(word)
+        if len(current) >= 7 or len(" ".join(current)) >= 38:
+            groups.append(" ".join(current))
+            current = []
+    if current:
+        groups.append(" ".join(current))
+    total_chars = sum(max(1, len(g)) for g in groups)
+    cursor = 0.0
+    lines = []
+    for index, group in enumerate(groups, start=1):
+        share = duration * max(1, len(group)) / total_chars
+        start = cursor
+        end = duration if index == len(groups) else min(duration, cursor + share)
+        lines.append(f"{index}\\n{timestamp(start)} --> {timestamp(end)}\\n{group}")
+        cursor = end
+    output_path.write_text("\\n\\n".join(lines) + "\\n", encoding="utf-8")
+
+
+@app.get("/")
 def home():
     return jsonify({
         "status": "online",
-        "mensagem": "Projeto Klebee - API de Geração de Vídeos Reais Ativa (Etapa 1)"
+        "projeto": "Super Robô Klebee",
+        "etapa": "gerador de vídeo por upload de MP4",
+        "upload_mp4": True
     })
+
 
 @app.route("/gerar-video-real", methods=["GET", "POST"])
 def gerar_video_real():
-    try:
-        # Suporte a parâmetros via GET (query string) ou JSON (POST)
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.args
-
-        url_video = data.get("url_video")
-        headline = data.get("headline", "ACHADINHO IMPERDÍVEL 😱")
-        texto_narração = data.get("texto", "Olha esse produto incrível que eu separei para você! Corre para garantir o seu clicando no link da sacolinha.")
-
-        if not url_video:
-            return jsonify({
-                "status": "erro",
-                "mensagem": "Parâmetro 'url_video' é obrigatório. Forneça o link de origem do vídeo do produto."
-            }), 400
-
-        logger.info(f"[WORKER] Iniciando processamento para headline: '{headline}' | URL: {url_video}")
-
-        video_original = os.path.join(TEMP_DIR, "input_produto.mp4")
-        audio_path = os.path.join(TEMP_DIR, "narracao.mp3")
-        legenda_path = os.path.join(TEMP_DIR, "legenda.srt")
-        video_final = os.path.join(TEMP_DIR, "video_final_afiliado.mp4")
-
-        # Limpeza prévia de arquivos temporários
-        for f in [video_original, audio_path, legenda_path, video_final]:
-            if os.path.exists(f):
-                os.remove(f)
-
-        # 1. Download do vídeo real do produto com cabeçalhos de segurança
-        logger.info("[BAIXANDO] Baixando mídia do produto...")
-        req = urllib.request.Request(
-            url_video,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        )
-        try:
-            with urllib.request.urlopen(req) as response, open(video_original, 'wb') as out_file:
-                out_file.write(response.read())
-        except Exception as e:
-            logger.error(f"[ERRO DOWNLOAD] Falha ao baixar o vídeo da URL fornecida: {str(e)}")
-            return jsonify({
-                "status": "erro",
-                "mensagem": f"Não foi possível baixar o vídeo da URL fornecida. Detalhe: {str(e)}"
-            }), 400
-
-        # 2. Síntese da narração comercial em português brasileiro (gTTS)
-        logger.info("[TTS] Gerando narração em português...")
-        tts = gTTS(text=texto_narração, lang="pt")
-        tts.save(audio_path)
-
-        # 3. Griação automática de arquivo de legendas simples sincronizadas (SRT)
-        # Dividindo o texto básico em blocos de tempo para exibição na tela
-        logger.info("[LEGENDA] Gerando arquivo SRT sincronizado...")
-        conteudo_srt = (
-            "1\n00:00:00,000 --> 00:00:04,500\n" + texto_narração[:45] + "\n\n"
-            "2\n00:00:04,500 --> 00:00:09,000\n" + texto_narração[45:90] + "\n\n"
-            "3\n00:00:09,000 --> 00:00:15,000\n" + texto_narração[90:] if len(texto_narração) > 90 else
-            "1\n00:00:00,000 --> 00:00:05,000\n" + texto_narração
-        )
-        with open(legenda_path, "w", encoding="utf-8") as f_srt:
-            f_srt.write(conteudo_srt)
-
-        # 4. Construção do filtro complexo do FFmpeg:
-        # - Redimensionamento e corte para formato vertical 9:16 (1080x1920)
-        # - Inclusão de faixa preta semi-transparente e texto da Headline no topo
-        # - Inclusão de legendas dinâmicas na parte inferior
-        # - Ducking de áudio (redução do som original para 20% e áudio da narração em 100%)
-        
-        # Nota: O filtro subtitles do FFmpeg exige caminhos normalizados sem caracteres especiais complexos no path
-        subtitles_filter = f"subtitles={legenda_path}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Alignment=2'"
-        
-        filtro_complexo = (
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-            f"drawbox=y=60:w=1080:h=140:color=black@0.6:t=fill,"
-            f"drawtext=text='{headline}':fontcolor=yellow:fontsize=50:x=(w-text_w)/2:y=100,"
-            f"{subtitles_filter}[v_out];"
-            "[0:a]volume=0.2[a1];[1:a]volume=1.0[a2];[a1][a2]amix=inputs=2:duration=first[aout]"
-        )
-
-        cmd_ffmpeg = [
-            "ffmpeg", "-y",
-            "-i", video_original,
-            "-i", audio_path,
-            "-filter_complex", filtro_complexo,
-            "-map", "[v_out]",
-            "-map", "[aout]",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-t", "15",  # Duração alvo de 15 segundos
-            "-shortest",
-            video_final
-        ]
-
-        logger.info("[FFMPEG] Renderizando vídeo vertical com headline, legendas e ducking...")
-        res_ffmpeg = subprocess.run(cmd_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if res_ffmpeg.returncode != 0:
-            logger.error(f"[FFMPEG ERRO] {res_ffmpeg.stderr}")
-            return jsonify({
-                "status": "erro",
-                "mensagem": "Falha na renderização do FFmpeg",
-                "detalhe": res_ffmpeg.stderr[-600:]
-            }), 500
-
-        # 5. Validação rigorosa do arquivo gerado via ffprobe e checagens estruturais
-        if not os.path.exists(video_final) or os.path.getsize(video_final) == 0:
-            return jsonify({"status": "erro", "mensagem": "Arquivo MP4 gerado não existe ou está vazio."}), 500
-
-        # Validação detalhada com ffprobe
-        probe_cmd = [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration:stream=codec_type",
-            "-of", "default=noprint_wrappers=1",
-            video_final
-        ]
-        probe_res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        
-        logger.info(f"[VALIDAÇÃO FFPROBE] Resultado:\n{probe_res.stdout}")
-
-        if "codec_type=video" not in probe_res.stdout or "codec_type=audio" not in probe_res.stdout:
-            return jsonify({
-                "status": "erro",
-                "mensagem": "Validação falhou: o arquivo final não contém fluxos de vídeo ou áudio válidos."
-            }), 500
-
-        tamanho_bytes = os.path.getsize(video_final)
-        logger.info(f"[SUCESSO] Vídeo gerado e validado com rigor! Tamanho: {tamanho_bytes} bytes")
-
+    # GET remains only as a compatibility/health hint; actual media generation
+    # should use POST multipart/form-data with field 'video'.
+    if request.method == "GET":
         return jsonify({
-            "status": "sucesso",
-            "mensagem": "Vídeo real de produto gerado, legendado e validado com sucesso!",
-            "tamanho_bytes": tamanho_bytes,
-            "download": "/download/video_final_afiliado.mp4"
-        })
+            "status": "instrucoes",
+            "mensagem": "Envie um POST multipart/form-data com o arquivo no campo 'video'.",
+            "campos": {"video": "arquivo .mp4", "headline": "opcional", "texto": "opcional"}
+        }), 200
 
-    except Exception as e:
-        logger.error(f"[EXCEÇÃO CRÍTICA] {str(e)}")
-        return jsonify({"status": "erro", "detalhe": str(e)}), 500
+    job_id = uuid.uuid4().hex
+    try:
+        headline = (request.form.get("headline") or DEFAULT_HEADLINE).strip()[:120]
+        narration = (request.form.get("texto") or DEFAULT_TEXT).strip()[:2000]
+        uploaded = request.files.get("video")
 
-@app.route("/download/<filename>")
+        with tempfile.TemporaryDirectory(prefix=f"klebee_{job_id}_") as temp:
+            work = Path(temp)
+            input_video = work / "input.mp4"
+            audio_path = work / "narracao.mp3"
+            subtitles_path = work / "legenda.srt"
+            output_temp = work / "render.mp4"
+
+            if uploaded and uploaded.filename:
+                if Path(uploaded.filename).suffix.lower() not in {".mp4", ".mov", ".m4v", ".webm"}:
+                    return jsonify({"status": "erro", "mensagem": "Formato não suportado. Envie um vídeo MP4, MOV, M4V ou WEBM."}), 400
+                uploaded.save(input_video)
+            else:
+                # Backward compatibility with direct media URLs, without attempting
+                # to resolve or scrape a Shopee product page.
+                url_video = (request.form.get("url_video") or "").strip()
+                parsed = urlparse(url_video)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    return jsonify({
+                        "status": "erro",
+                        "mensagem": "Envie um arquivo no campo 'video' ou uma URL direta de arquivo de mídia em 'url_video'. Link de página de produto ainda não é suportado."
+                    }), 400
+                req = Request(url_video, headers={"User-Agent": "Mozilla/5.0"})
+                with urlopen(req, timeout=45) as response, input_video.open("wb") as out:
+                    shutil.copyfileobj(response, out, length=1024 * 1024)
+
+            if not input_video.exists() or input_video.stat().st_size == 0:
+                return jsonify({"status": "erro", "mensagem": "O vídeo enviado está vazio."}), 400
+
+            original_duration, stream_kinds = probe(input_video)
+            logger.info("[%s] Vídeo recebido (%.2fs); streams=%s", job_id, original_duration, stream_kinds)
+
+            logger.info("[%s] Gerando narração em português", job_id)
+            gTTS(text=narration, lang="pt-br").save(str(audio_path))
+            speech_duration, speech_kinds = probe(audio_path)
+            if "audio" not in speech_kinds:
+                raise RuntimeError("A narração gerada não contém áudio.")
+
+            make_srt(narration, speech_duration, subtitles_path)
+            subtitle_arg = ffmpeg_escape_path(subtitles_path)
+            subtitle_filter = (
+                f"subtitles='{subtitle_arg}':force_style="
+                "'FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2'"
+            )
+            video_filter = (
+                "scale=1080:1920:force_original_aspect_ratio=increase,"
+                "crop=1080:1920,"
+                "drawbox=x=0:y=45:w=iw:h=150:color=black@0.60:t=fill,"
+                f"drawtext=text='{escape_drawtext(headline)}':fontcolor=yellow:"
+                "fontsize=48:x=(w-text_w)/2:y=95,"
+                f"{subtitle_filter}"
+            )
+
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(input_video), "-i", str(audio_path)]
+            if "audio" in stream_kinds:
+                audio_filter = (
+                    "[0:a]volume=0.20[original];"
+                    "[1:a]volume=1.0[voice];"
+                    "[original][voice]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+                )
+                cmd += ["-filter_complex", f"[0:v]{video_filter}[vout];{audio_filter}",
+                        "-map", "[vout]", "-map", "[aout]"]
+            else:
+                cmd += ["-vf", video_filter, "-map", "0:v:0", "-map", "1:a:0"]
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k", "-t", "15", "-movflags", "+faststart", str(output_temp)]
+
+            logger.info("[%s] Iniciando FFmpeg", job_id)
+            run_command(cmd)
+            final_name = f"klebee_{job_id}.mp4"
+            final_path = OUTPUT_DIR / final_name
+            shutil.copy2(output_temp, final_path)
+            final_duration, final_streams = probe(final_path)
+            if "video" not in final_streams or "audio" not in final_streams:
+                final_path.unlink(missing_ok=True)
+                raise RuntimeError("O MP4 final não contém os fluxos de áudio e vídeo esperados.")
+
+            logger.info("[%s] Render concluído: %s bytes, %.2fs", job_id, final_path.stat().st_size, final_duration)
+            return jsonify({
+                "status": "sucesso",
+                "mensagem": "MP4 renderizado e validado estruturalmente.",
+                "job_id": job_id,
+                "duracao_segundos": round(final_duration, 2),
+                "tamanho_bytes": final_path.stat().st_size,
+                "observacao": "As legendas são distribuídas ao longo da duração da narração; sincronização palavra a palavra ainda não foi implementada.",
+                "download": url_for("download_file", filename=final_name, _external=True)
+            }), 200
+
+    except Exception as exc:
+        logger.exception("[%s] Falha ao gerar vídeo", job_id)
+        return jsonify({"status": "erro", "job_id": job_id, "mensagem": str(exc)[-2000:]}), 500
+
+
+@app.get("/download/<filename>")
 def download_file(filename):
-    return send_from_directory(TEMP_DIR, filename, as_attachment=True)
+    if not re.fullmatch(r"klebee_[a-f0-9]{32}\\.mp4", filename):
+        return jsonify({"status": "erro", "mensagem": "Nome de arquivo inválido."}), 400
+    path = OUTPUT_DIR / filename
+    if not path.is_file():
+        return jsonify({"status": "erro", "mensagem": "Vídeo não encontrado ou expirado."}), 404
+    return send_from_directory(OUTPUT_DIR, filename, as_attachment=True, mimetype="video/mp4")
+
+
+@app.errorhandler(413)
+def too_large(_error):
+    return jsonify({"status": "erro", "mensagem": "Arquivo acima do limite de 300 MB."}), 413
+
 
 if __name__ == "__main__":
-    porta = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=porta)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8080")))
