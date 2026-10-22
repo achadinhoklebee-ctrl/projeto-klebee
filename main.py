@@ -2,8 +2,11 @@ import os
 import logging
 import subprocess
 import urllib.request
+import uuid
+import shutil
+from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
-from gtts import gTTS
+from klebee_tts import generate_narration_with_timestamps
 
 # Configuração de logs
 logging.basicConfig(level=logging.INFO)
@@ -42,15 +45,15 @@ def gerar_video_real():
 
         logger.info(f"[WORKER] Iniciando processamento para headline: '{headline}' | URL: {url_video}")
 
-        video_original = os.path.join(TEMP_DIR, "input_produto.mp4")
-        audio_path = os.path.join(TEMP_DIR, "narracao.mp3")
-        legenda_path = os.path.join(TEMP_DIR, "legenda.srt")
-        video_final = os.path.join(TEMP_DIR, "video_final_afiliado.mp4")
-
-        # Limpeza prévia de arquivos temporários
-        for f in [video_original, audio_path, legenda_path, video_final]:
-            if os.path.exists(f):
-                os.remove(f)
+        # Diretório exclusivo por requisição: impede colisões entre renderizações.
+        task_id = str(uuid.uuid4())
+        task_dir = os.path.join(TEMP_DIR, f"klebee_task_{task_id}")
+        os.makedirs(task_dir, exist_ok=False)
+        video_original = os.path.join(task_dir, "input_produto.mp4")
+        audio_path = os.path.join(task_dir, "narracao.mp3")
+        legenda_path = os.path.join(task_dir, "legenda.srt")
+        captions_path = os.path.join(task_dir, "captionSegments.json")
+        video_final = os.path.join(task_dir, "video_final_afiliado.mp4")
 
         # 1. Download do vídeo real do produto com cabeçalhos de segurança
         logger.info("[BAIXANDO] Baixando mídia do produto...")
@@ -68,22 +71,27 @@ def gerar_video_real():
                 "mensagem": f"Não foi possível baixar o vídeo da URL fornecida. Detalhe: {str(e)}"
             }), 400
 
-        # 2. Síntese da narração comercial em português brasileiro (gTTS)
-        logger.info("[TTS] Gerando narração em português...")
-        tts = gTTS(text=texto_narração, lang="pt")
-        tts.save(audio_path)
-
-        # 3. Griação automática de arquivo de legendas simples sincronizadas (SRT)
-        # Dividindo o texto básico em blocos de tempo para exibição na tela
-        logger.info("[LEGENDA] Gerando arquivo SRT sincronizado...")
-        conteudo_srt = (
-            "1\n00:00:00,000 --> 00:00:04,500\n" + texto_narração[:45] + "\n\n"
-            "2\n00:00:04,500 --> 00:00:09,000\n" + texto_narração[45:90] + "\n\n"
-            "3\n00:00:09,000 --> 00:00:15,000\n" + texto_narração[90:] if len(texto_narração) > 90 else
-            "1\n00:00:00,000 --> 00:00:05,000\n" + texto_narração
+        # 2. Voz neural brasileira + marcações reais de cada palavra emitidas pelo Edge-TTS.
+        logger.info("[TTS] Gerando narração e timestamps WordBoundary...")
+        caption_segments = generate_narration_with_timestamps(
+            texto_narração, audio_path, captions_path, "pt-BR-FranciscaNeural"
         )
+
+        # 3. SRT de compatibilidade para o pipeline FFmpeg, derivado dos timestamps reais.
+        def srt_time(ms):
+            ms = max(0, int(ms))
+            hours, rem = divmod(ms, 3_600_000)
+            minutes, rem = divmod(rem, 60_000)
+            seconds, millis = divmod(rem, 1_000)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+        srt_blocks = []
+        for index, cue in enumerate(caption_segments, start=1):
+            srt_blocks.append(
+                f"{index}\\n{srt_time(cue['startMs'])} --> {srt_time(cue['endMs'])}\\n{cue['text']}\\n"
+            )
         with open(legenda_path, "w", encoding="utf-8") as f_srt:
-            f_srt.write(conteudo_srt)
+            f_srt.write("\\n".join(srt_blocks))
 
         # 4. Construção do filtro complexo do FFmpeg:
         # - Redimensionamento e corte para formato vertical 9:16 (1080x1920)
@@ -156,16 +164,22 @@ def gerar_video_real():
             "status": "sucesso",
             "mensagem": "Vídeo real de produto gerado, legendado e validado com sucesso!",
             "tamanho_bytes": tamanho_bytes,
-            "download": "/download/video_final_afiliado.mp4"
+            "download": f"/download/{task_id}/video_final_afiliado.mp4",\n            "caption_segments": caption_segments,\n            "task_id": task_id
         })
 
     except Exception as e:
         logger.error(f"[EXCEÇÃO CRÍTICA] {str(e)}")
         return jsonify({"status": "erro", "detalhe": str(e)}), 500
 
-@app.route("/download/<filename>")
-def download_file(filename):
-    return send_from_directory(TEMP_DIR, filename, as_attachment=True)
+@app.route("/download/<task_id>/<filename>")
+def download_file(task_id, filename):
+    # Accept only the generated task directory and a plain filename.
+    if not task_id.startswith("klebee_") and len(task_id) != 36:
+        return jsonify({"status": "erro", "mensagem": "Identificador de tarefa inválido."}), 400
+    if filename not in {"video_final_afiliado.mp4"}:
+        return jsonify({"status": "erro", "mensagem": "Arquivo não permitido."}), 400
+    task_dir = os.path.join(TEMP_DIR, f"klebee_task_{task_id}")
+    return send_from_directory(task_dir, filename, as_attachment=True)
 
 if __name__ == "__main__":
     porta = int(os.environ.get("PORT", 8080))
