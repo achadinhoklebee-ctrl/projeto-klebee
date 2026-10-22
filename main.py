@@ -93,9 +93,9 @@ def make_srt(text, duration, output_path):
         share = duration * max(1, len(group)) / total_chars
         start = cursor
         end = duration if index == len(groups) else min(duration, cursor + share)
-        lines.append(f"{index}\\n{timestamp(start)} --> {timestamp(end)}\\n{group}")
+        lines.append(f"{index}\n{timestamp(start)} --> {timestamp(end)}\n{group}")
         cursor = end
-    output_path.write_text("\\n\\n".join(lines) + "\\n", encoding="utf-8")
+    output_path.write_text("\n\n".join(lines) + "\n", encoding="utf-8")
 
 
 @app.get("/")
@@ -220,7 +220,7 @@ def gerar_video_real():
 
 @app.get("/download/<filename>")
 def download_file(filename):
-    if not re.fullmatch(r"klebee_[a-f0-9]{32}\\.mp4", filename):
+    if not re.fullmatch(r"klebee_[a-f0-9]{32}\.mp4", filename):
         return jsonify({"status": "erro", "mensagem": "Nome de arquivo inválido."}), 400
     path = OUTPUT_DIR / filename
     if not path.is_file():
