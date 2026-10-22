@@ -53,6 +53,7 @@ jobs:
           mkdir -p test-output
           ffmpeg -y -f lavfi -i "testsrc2=size=540x960:rate=30" -f lavfi -i "sine=frequency=440:sample_rate=44100" -t 15 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest test-output/source-test.mp4
           ffmpeg -y -f lavfi -i "sine=frequency=880:sample_rate=44100" -t 15 -c:a libmp3lame -q:a 5 test-output/narration-test.mp3
+          ffmpeg -y -f lavfi -i "sine=frequency=220:sample_rate=44100" -f lavfi -i "sine=frequency=329.63:sample_rate=44100" -filter_complex "[0:a]volume=0.35[a0];[1:a]volume=0.22[a1];[a0][a1]amix=inputs=2:duration=longest,afade=t=in:st=0:d=1,afade=t=out:st=13:d=2" -t 15 -c:a libmp3lame -q:a 5 test-output/music-test.mp3
           cat > test-output/captions.json <<'JSON'
           [
             {"text":"TESTE","startMs":0,"endMs":900},
@@ -64,13 +65,14 @@ jobs:
           JSON
 
       - name: Render a real MP4 with Remotion
-        run: npm run render:klebee -- test-output/source-test.mp4 test-output/narration-test.mp3 test-output/captions.json test-output/klebee-remotion-smoke-test.mp4 "TESTE KLEBEE!"
+        run: npm run render:klebee -- test-output/source-test.mp4 test-output/narration-test.mp3 test-output/captions.json test-output/klebee-remotion-smoke-test.mp4 "TESTE KLEBEE!" "BENEFÍCIO DE TESTE" "VEJA NA SHOPEE" test-output/music-test.mp3
 
       - name: Verify rendered MP4
         run: |
           test -s test-output/klebee-remotion-smoke-test.mp4
           ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 test-output/klebee-remotion-smoke-test.mp4
           ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 test-output/klebee-remotion-smoke-test.mp4
+          ffprobe -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 test-output/klebee-remotion-smoke-test.mp4
 
       - name: Upload rendered MP4 for inspection
         uses: actions/upload-artifact@v4
