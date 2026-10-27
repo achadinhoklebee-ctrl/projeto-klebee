@@ -1,15 +1,14 @@
-"""Super Robô Klebee — V158 - FIX DUPLICACAO - 1 FRASE = 1 LEGENDA - PREMIERE"""
+"""Super Robô Klebee — V159 - 【entity-PREMIERE PRO¦canonical_name=Premiere Pro】 REAL - PNG POR PALAVRA - SEM .ASS"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
-from typing import Any
 import edge_tts
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V158-PREMIERE-1X"
+VERSION = "KLEBEE-V159-PNG-PREMIERE"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -42,7 +41,7 @@ def wrap(draw, text, f, max_width):
     lines, cur = [], ""
     for w in text.split():
         cand = f"{cur} {w}".strip()
-        if draw.textbbox((0,0), cand, font=f, stroke_width=13)[2] <= max_width:
+        if draw.textbbox((0,0), cand, font=f, stroke_width=10)[2] <= max_width:
             cur = cand
         else:
             if cur: lines.append(cur)
@@ -51,7 +50,7 @@ def wrap(draw, text, f, max_width):
     return lines[:3]
 
 def make_headline(path: Path, text: str):
-    image = Image.new("RGBA", (W, 480), (0,0,0,0))
+    image = Image.new("RGBA", (W, 500), (0,0,0,0))
     draw = ImageDraw.Draw(image)
     size = 112
     while size >= 60:
@@ -68,13 +67,57 @@ def make_headline(path: Path, text: str):
         y += box[3]-box[1]+16
     image.save(path)
 
-def ass_time(s: float) -> str:
-    n = max(0, round(s*100))
-    h,n = divmod(n,360000); m,n = divmod(n,6000); sec,cs = divmod(n,100)
-    return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
+def make_caption_png(path: Path, words: list[str], active_idx: int):
+    """Gera 1 PNG com frase completa, só active em amarelo"""
+    img = Image.new("RGBA", (W, 400), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    f = font(68)
+    
+    # Monta linhas com quebra inteligente - max 3 palavras por linha para não cortar borda
+    text = " ".join(words)
+    # Limita a frase para fazer sentido: pega janela de 5 palavras em torno da ativa
+    start = max(0, active_idx - 2)
+    end = min(len(words), active_idx + 3)
+    window = words[start:end]
+    
+    lines = []
+    cur_line = []
+    for w in window:
+        cur_line.append(w)
+        if len(cur_line) >= 4:  # 4 palavras por linha max
+            lines.append(cur_line)
+            cur_line = []
+    if cur_line:
+        lines.append(cur_line)
+    if len(lines) > 2: lines = lines[:2]  # Max 2 linhas
+    
+    y = 10
+    for line_words in lines:
+        # Calcula largura total da linha
+        line_text = " ".join(line_words)
+        bbox = draw.textbbox((0,0), line_text, font=f, stroke_width=9)
+        total_w = bbox[2]-bbox[0]
+        x = (W - total_w)//2
+        
+        for w in line_words:
+            global_idx = words.index(w, start) if w in words[start:end] else -1
+            # Verifica se é a palavra ativa
+            is_active = (window.index(w) + start == active_idx) if w in window else False
+            
+            # Calcula bbox da palavra
+            wb = draw.textbbox((0,0), w+" ", font=f, stroke_width=9)
+            ww = wb[2]-wb[0]
+            
+            color = "#FFE500" if is_active else "#FFFFFF"
+            # Desenha com contorno preto grosso estilo TikTok
+            draw.text((x, y), w, font=f, fill=color, stroke_width=9, stroke_fill=(0,0,0,255))
+            x += ww
+        y += 80
 
-def esc_ass(s: str) -> str:
-    return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+    img.save(path)
+
+def esc_filter_path(p: Path) -> str:
+    return str(p.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
 
 async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: float):
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
@@ -93,48 +136,6 @@ async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: 
         words.append({"text": w, "start": start, "end": end})
     return words
 
-def make_ass_premiere_1x(path: Path, words, duration: float):
-    header = """[Script Info]
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 2
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,DejaVu Sans,74,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,2,2,80,80,300,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    # Blocos de 2 palavras - 1 legenda por bloco
-    blocks=[]
-    cur=[]
-    for w in words:
-        cur.append(w)
-        if len(cur)>=2:
-            blocks.append(cur); cur=[]
-    if cur: blocks.append(cur)
-
-    events=[]
-    for block in blocks:
-        s = block[0]["start"]
-        e = min(duration, block[-1]["end"])
-        if e <= s: e = s + 0.7
-
-        # 1 FRASE = 1 LEGENDA com karaoke \k
-        line = ""
-        for w in block:
-            # Duracao em centesimos para \k
-            k_dur = int(max(0.15, w["end"] - w["start"]) * 100)
-            if k_dur < 15: k_dur = 35
-            line += f"{{\\k{k_dur}}}{esc_ass(w['text'])} "
-
-        events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line.strip()}")
-
-    path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-
 def download(url: str, folder: Path) -> Path:
     opts={"format":"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best","outtmpl":str(folder/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4"}
     with YoutubeDL(opts) as ydl: ydl.extract_info(url, download=True)
@@ -147,14 +148,42 @@ def probe_duration(path: Path) -> float:
     try: return float(p.stdout.strip())
     except: return 10.0
 
-def render(source, audio, ass, headline, output, duration):
-    ass_path=str(ass.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
-    hl_path=str(headline.resolve()).replace("\\","/")
-    cmd=[binary("ffmpeg"),"-y","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",hl_path,"-filter_complex",f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg];[bg][2:v]overlay=0:45[with_headline];[with_headline]ass='{ass_path}'[v];[0:a]volume=0.18[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]","-map","[v]","-map","[a_final]","-t",f"{duration:.3f}","-threads","4","-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k",str(output)]
-    run(cmd,400)
+def render_png_sequence(source, audio, headline, caption_pngs, words, output, duration):
+    # Constrói filter_complex com overlays encadeados com enable=between
+    # Inputs: 0:v source, 1:a audio, 2:v headline, 3:v cap0, 4:v cap1...
+    filters = []
+    # Primeiro scale e crop
+    filters.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg]")
+    last = "[bg]"
+    next_idx = 0
+    filters.append(f"{last}[2:v]overlay=0:45[tmp{next_idx}]")
+    last = f"[tmp{next_idx}]"
+    next_idx+=1
+
+    # Overlays de legenda com tempo
+    for i, (png_path, w) in enumerate(zip(caption_pngs, words)):
+        s = w["start"]
+        e = min(duration, w["end"])
+        # Input index para este png = 3 + i
+        input_label = f"[{3+i}:v]"
+        filters.append(f"{last}{input_label}overlay=(W-w)/2:H-380:enable='between(t,{s:.3f},{e:.3f})'[tmp{next_idx}]")
+        last = f"[tmp{next_idx}]"
+        next_idx+=1
+
+    # Audio mix
+    filters.append(f"[0:a]volume=0.18[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]")
+
+    filter_complex = ";".join(filters)
+
+    cmd = [binary("ffmpeg"),"-y","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",str(headline)]
+    # Adiciona todos os pngs como inputs
+    for p in caption_pngs:
+        cmd.extend(["-i", str(p)])
+    cmd.extend(["-filter_complex", filter_complex, "-map", last, "-map", "[a_final]", "-t", f"{duration:.3f}", "-threads","4","-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k", str(output)])
+    run(cmd,500)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<h1>KLEBEE V158 - 1 FRASE = 1 LEGENDA</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V158</a>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V159 - PNG PREMIERE</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V159</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -162,6 +191,7 @@ def health(): return {"status":"ok","version":VERSION}
 @app.get("/render-web")
 async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!")):
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True)
+    caps_dir = folder / "caps"; caps_dir.mkdir()
     try:
         source=download(video_url,folder); audio=folder/"narration.mp3"
         txt="Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
@@ -174,10 +204,18 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         audio_dur=probe_duration(tmp)
         duration=min(16.0, max(10.5, audio_dur + 0.5))
         words=await make_voice_and_words_real_time(txt,audio,duration)
-        ass=folder/"captions.ass"; make_ass_premiere_1x(ass,words,duration)
+
+        # Gera 1 PNG por palavra com frase com sentido
+        all_texts = [w["text"] for w in words]
+        caption_pngs=[]
+        for i, w in enumerate(words):
+            p = caps_dir / f"cap_{i:03d}.png"
+            make_caption_png(p, all_texts, i)
+            caption_pngs.append(p)
+
         hl=folder/"headline.png"; make_headline(hl,headline)
-        out=folder/"klebee.mp4"; render(source,audio,ass,hl,out,duration)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v158.mp4")
+        out=folder/"klebee.mp4"; render_png_sequence(source,audio,hl,caption_pngs,words,out,duration)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v159.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
