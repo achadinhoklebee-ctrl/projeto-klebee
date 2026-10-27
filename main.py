@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V153 - AUDITADO POR CLAUDE - FIX DEFINITIVO PREMIERE"""
+"""Super Robô Klebee — V154 - FIX CORTE DE TEXTO - 2 PALAVRAS POR VEZ"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V153-CLAUDE-AUDIT"
+VERSION = "KLEBEE-V154-NO-CUT"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -35,7 +35,7 @@ def font(size: int):
     for pth in FONT_PATHS:
         if Path(pth).is_file():
             try: return ImageFont.truetype(pth, size=size)
-            except OSError: pass
+            except: pass
     return ImageFont.load_default()
 
 def wrap(draw, text, f, max_width):
@@ -53,12 +53,12 @@ def wrap(draw, text, f, max_width):
 def make_headline(path: Path, text: str):
     image = Image.new("RGBA", (W, 480), (0,0,0,0))
     draw = ImageDraw.Draw(image)
-    size = 112
-    while size >= 62:
+    size = 110
+    while size >= 60:
         f = font(size)
         if wrap(draw, text.upper(), f, W-120): break
         size -= 2
-    f = font(max(size, 62))
+    f = font(max(size, 60))
     lines = wrap(draw, text.upper(), f, W-120) or [text.upper()]
     y = 15
     for line in lines:
@@ -93,7 +93,7 @@ async def make_voice(text: str, path: Path):
         words=[{"text":w,"start":i*step,"end":(i+1)*step} for i,w in enumerate(clean)]
     return words
 
-def make_ass_claude_fix(path: Path, words, duration: float):
+def make_ass_fix_corte(path: Path, words, duration: float):
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -103,55 +103,52 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,DejaVu Sans,86,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,3,5,80,80,320,1
+Style: Caption,DejaVu Sans,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,2,2,80,80,300,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    # FIX CLAUDE: Agrupa por VAD (pausa > 0.45s) e nunca mistura frases
-    blocks = []
-    cur = []
+    blocks=[]
+    cur=[]
     for w in words:
-        if cur and (w["start"] - cur[-1]["end"] > 0.45):
-            blocks.append(cur)
-            cur = []
         cur.append(w)
-        if len(cur) >= 4:
+        # FIX: maximo 2 palavras por bloco (padrao TikTok viral)
+        if len(cur)>=2 or w["text"].endswith((".", "!", "?", ",")):
             blocks.append(cur)
-            cur = []
-    if cur:
-        blocks.append(cur)
+            cur=[]
+    if cur: blocks.append(cur)
 
-    events = []
-    last_end = 0.0
+    events=[]
+    last_end=0.0
     for block in blocks:
-        block_start = max(last_end + 0.01, block[0]["start"])
-        block_end = block[-1]["end"] + 0.35
-        # Garante que o bloco todo cabe sem sobrepor o proximo
-        # Vamos criar eventos internos sequenciais dentro do bloco
         for idx, active in enumerate(block):
-            s = max(block_start + (active["start"] - block[0]["start"]), last_end + 0.01)
-            if idx + 1 < len(block):
-                e = block[idx+1]["start"]
+            s = max(active["start"], last_end + 0.01)
+            if idx+1 < len(block):
+                e = block[idx+1]["start"] - 0.01
             else:
-                e = block_end
-            # FIX CLAUDE: Se e <= s, força 0.28s minimo (evita inversao)
-            if e <= s:
-                e = s + 0.28
-            # Trava para nao invadir proximo bloco
-            if e > block_end:
-                e = block_end
+                # Ultima palavra segura ate proximo bloco
+                next_block_start = None
+                try:
+                    b_idx = blocks.index(block)
+                    if b_idx+1 < len(blocks):
+                        next_block_start = blocks[b_idx+1][0]["start"]
+                except: pass
+                if next_block_start:
+                    e = next_block_start - 0.01
+                else:
+                    e = min(duration, active["end"]+0.45)
+            if e <= s: e = s + 0.30
 
-            parts = []
+            parts=[]
             for j, bw in enumerate(block):
-                tok = esc_ass(bw["text"])
-                if j == idx:
+                tok=esc_ass(bw["text"])
+                if j==idx:
                     parts.append(f"{{\\c&H00E5FF&\\b1}}{tok}{{\\c&HFFFFFF&\\b0}}")
                 else:
                     parts.append(tok)
-            line = " ".join(parts)
+            line=" ".join(parts)
             events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line}")
-            last_end = e
+            last_end=e
 
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
@@ -173,7 +170,7 @@ def render(source, audio, ass, headline, output, duration):
     run(cmd,400)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<html><body style='background:#0f172a;color:#fff;text-align:center;padding:60px'><h1>KLEBEE V153 - AUDITORIA CLAUDE</h1><p>Fix sobreposicao + VAD 0.45s</p><a style='background:#22c55e;color:white;padding:18px 36px;border-radius:10px;text-decoration:none' href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V153</a></body></html>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V154 - FIX CORTE</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V154</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -185,10 +182,10 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         source=download(video_url,folder); audio=folder/"narration.mp3"
         txt="Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         words=await make_voice(txt,audio); dur=min(16.0,max(10.0,probe_duration(audio)+0.2))
-        ass=folder/"captions.ass"; make_ass_claude_fix(ass,words,dur)
+        ass=folder/"captions.ass"; make_ass_fix_corte(ass,words,dur)
         hl=folder/"headline.png"; make_headline(hl,headline)
         out=folder/"klebee.mp4"; render(source,audio,ass,hl,out,dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v153.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v154.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
