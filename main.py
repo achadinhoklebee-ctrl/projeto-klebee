@@ -1,4 +1,3 @@
-
 """
 V177f - FIX CENTRALIZACAO COMPARTIMENTOS - DEFINITIVO
 Problema: total tava ws+6, mas real é ws+16 (caixinha). Centralização errada.
@@ -13,7 +12,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V179-ZERO-SYNC-WATERMARK+PULSO"
+VERSION = "V180-FIX-BORRAO-UTENSILIOS-SYNC"
 SYNC_FIX_V179 = True  # True = zero atraso final
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
@@ -234,7 +233,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
     #    - Novo: força último word end = audio_duration - 0.02 EXATO, escala linear só até penúltima palavra
     #    - Remove silêncio final do Edge-TTS (-0.15s trim)
     # Pulso: scale oscila 1.0 a 1.05 a cada 3 segundos pra chamar atenção sem irritar
-    PULSE_ENABLED = True  # True = com pulso, False = estático
+    PULSE_ENABLED = False  # V180: desativa pulso pra evitar borrão laranja - usa estático nítido
     if PULSE_ENABLED:
         filters=[
             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
@@ -242,7 +241,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
             f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
             # Marca d'água com pulso: scale 1.0 -> 1.05 a cada 3s (sin)
             f"[4:v]scale=w='iw*(1+0.05*abs(sin(2*PI*t/3)))':h='ih*(1+0.05*abs(sin(2*PI*t/3)))':eval=frame[wm_pulse]",
-            f"[tmp1][wm_pulse]overlay=W-w-20:450:format=auto[final]",
+            f"[tmp1][wm_pulse]overlay=W-w-20:450:format=rgb[final]",
             "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
         ]
     else:
@@ -250,7 +249,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
             f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
             f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
-            f"[tmp1][4:v]overlay=W-w-20:450:format=auto[final]",
+            f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1:enable='lte(t,{real_duration})'[final]".format(real_duration='{REAL_DUR}') if False else f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1[final]",
             "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
         ]
     fc=";".join(filters)
@@ -285,6 +284,7 @@ async def render():
         caps_video=folder/"caps_video.mov"
         make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
+        headline_text = fix_pronuncia_utensilios(headline_text)
         make_headline_2lines(hl, headline_text)
         # Watermark Klebee 180px 75% topo direita
         import shutil as _shutil
