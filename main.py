@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V164 - FIX FFMPEG LOOP PNG - BUILD OK + RENDER OK"""
+"""Super Robô Klebee — V165 - FIX OOM - VOLTA ASS LEVE + HEADLINE 135PT PRINT 4"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V164-LOOP-FIX"
+VERSION = "KLEBEE-V165-ASS-FIX-OOM"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -73,20 +73,41 @@ def make_headline_print4(path: Path, text: str):
         y += bbox[3]-bbox[1] + 22
     image.save(path)
 
-def make_caption_one_word(path: Path, word: str):
-    img = Image.new("RGBA", (W, 300), (0,0,0,0))
-    draw = ImageDraw.Draw(img)
-    size = 96
-    f = font(size)
-    bbox = draw.textbbox((0,0), word, font=f, stroke_width=12)
-    while bbox[2]-bbox[0] > W-100 and size > 50:
-        size -= 4
-        f = font(size)
-        bbox = draw.textbbox((0,0), word, font=f, stroke_width=12)
-    x = (W - (bbox[2]-bbox[0])) // 2
-    draw.text((x+3, 33), word, font=f, fill="black", stroke_width=12, stroke_fill="black")
-    draw.text((x, 30), word, font=f, fill="#FFE500", stroke_width=12, stroke_fill="black")
-    img.save(path)
+def ass_time(s: float) -> str:
+    n = max(0, round(s*100))
+    h,n = divmod(n,360000); m,n = divmod(n,6000); sec,cs = divmod(n,100)
+    return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
+
+def esc_ass(s: str) -> str:
+    return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+
+def make_ass_one_word_70pct(path: Path, words, duration: float):
+    # LEGENDA 70% ALTURA = 615px do rodapé (evita link Shopee)
+    # 70% de 1920 = 1344 topo = 576 rodapé
+    header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Caption,DejaVu Sans,98,&H0000E5FF,&H0000E5FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,12,2,2,80,80,615,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events = []
+    for w in words:
+        s = w["start"]
+        e = min(duration, w["end"])
+        if e <= s:
+            e = s + 0.35
+        txt = esc_ass(w["text"])
+        events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{txt}")
+    
+    path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 def download(url: str, folder: Path) -> Path:
     opts = {"format":"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best","outtmpl":str(folder/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4"}
@@ -104,39 +125,26 @@ def probe_duration(path: Path) -> float:
     except:
         return 10.0
 
-def render_final_fixed(source, audio, headline, caption_pngs, words, output, duration):
-    CAPTION_Y = int(H * 0.68)
-    filters = []
-    filters.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg]")
-    last = "[bg]"
-    idx = 0
-    # Headline é input 2
-    filters.append(f"{last}[2:v]overlay=0:35[tmp{idx}]")
-    last = f"[tmp{idx}]"; idx+=1
-    
-    for i, w in enumerate(words):
-        s = w["start"]; e = min(duration, w["end"])
-        # Inputs de legenda começam em 3
-        filters.append(f"{last}[{3+i}:v]overlay=0:{CAPTION_Y}:enable='between(t,{s:.3f},{e:.3f})'[tmp{idx}]")
-        last = f"[tmp{idx}]"; idx+=1
-    
-    filters.append(f"[0:a]volume=0.15[a_music];[1:a]volume=1.25[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]")
-    fc = ";".join(filters)
-    
-    # FIX LOOP: cada PNG precisa de -loop 1 -t duration
-    cmd = [binary("ffmpeg"),"-y","-stream_loop","1","-i",str(source),"-i",str(audio)]
-    # Headline com loop
-    cmd.extend(["-loop","1","-t",f"{duration:.3f}","-i",str(headline)])
-    # Cada legenda com loop
-    for p in caption_pngs:
-        cmd.extend(["-loop","1","-t",f"{duration:.3f}","-i",str(p)])
-    
-    cmd.extend(["-filter_complex", fc, "-map", last, "-map", "[a_final]", "-t", f"{duration:.3f}", "-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k", str(output)])
-    run(cmd,600)
+def render_ass_fixed(source, audio, headline, ass_path, output, duration):
+    ass_esc = str(ass_path.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
+    cmd = [
+        binary("ffmpeg"),"-y",
+        "-stream_loop","1","-i",str(source),
+        "-i",str(audio),
+        "-loop","1","-t",f"{duration:.3f}","-i",str(headline),
+        "-filter_complex",
+        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg];[bg][2:v]overlay=0:35[with_head];[with_head]ass='{ass_esc}'[v];[0:a]volume=0.15[a_music];[1:a]volume=1.25[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]",
+        "-map","[v]","-map","[a_final]",
+        "-t",f"{duration:.3f}",
+        "-c:v","libx264","-preset","ultrafast","-crf","20",
+        "-c:a","aac","-b:a","192k",
+        str(output)
+    ]
+    run(cmd,400)
 
 @app.get("/")
 def home():
-    return HTMLResponse(f"<h1>KLEBEE V164 - LOOP FIX</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V164</a>")
+    return HTMLResponse(f"<h1>KLEBEE V165 - ASS FIX OOM</h1><p>Headline 135pt print 4 + Legenda 1 palavra 70% - sem estourar RAM</p><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V165</a>")
 
 @app.get("/health")
 def health():
@@ -145,7 +153,6 @@ def health():
 @app.get("/render-web")
 async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!"), voice: str = Query("Francisca")):
     job = uuid.uuid4().hex; folder = JOBS/job; folder.mkdir(parents=True)
-    caps_dir = folder/"caps"; caps_dir.mkdir()
     try:
         if voice.lower().startswith("anton"):
             voice_id = "pt-BR-AntonioNeural"; rate = "+12%"
@@ -178,16 +185,14 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         for i, w in enumerate(clean):
             s = 0.15 + i*time_per; e = s+time_per
             words.append({"text": w, "start": s, "end": e})
-        caps = []
-        for i, w in enumerate(words):
-            p = caps_dir/f"cap_{i:03d}.png"
-            make_caption_one_word(p, w["text"])
-            caps.append(p)
+        
+        ass = folder/"captions.ass"
+        make_ass_one_word_70pct(ass, words, duration)
         hl = folder/"headline.png"
         make_headline_print4(hl, headline)
         out = folder/"klebee.mp4"
-        render_final_fixed(source, audio, hl, caps, words, out, duration)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v164.mp4")
+        render_ass_fixed(source, audio, hl, ass, out, duration)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v165.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
