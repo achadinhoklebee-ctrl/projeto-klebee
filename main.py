@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V175.1 - FIX SYNTAX SHOPEE_ORANGE - MESMO V175"""
+"""Super Robô Klebee — V176 - HEADLINE RANSOM 3 PILULAS COLORIDAS + SYNC ZERO"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time, random
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V175.1-FIX-SYNTAX"
+VERSION = "KLEBEE-V176-FINAL"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -16,9 +16,8 @@ JOBS.mkdir(parents=True, exist_ok=True)
 W, H = 1080, 1920
 VOICE = "pt-BR-FranciscaNeural"
 RATE = "+10%"
-ORANGE = "#FF6B00"
 
-PALETTE = [("#FFEB3B","black"),("#E91E63","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#FF9800","black"),("#4CAF50","white")]
+PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#E91E63","white"),("#4CAF50","white")]
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf","/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
 
@@ -46,69 +45,81 @@ def font(sz: int):
                 pass
     return ImageFont.load_default()
 
-def make_ransom_72pt_center(path: Path, word: str):
-    f = font(72)
-    img = Image.new("RGBA", (W, 600), (0,0,0,0))
+def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600):
+    f = font(fsize)
+    img = Image.new("RGBA", (W, canvas_h), (0,0,0,0))
     letters = list(word.upper())
-    total_w = 0
-    ws = []
+    ws=[]; total=0
     dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
     for lt in letters:
-        if lt.strip() == "":
-            ws.append(14); total_w+=14
+        if lt.strip()=="":
+            ws.append(14); total+=14
         else:
-            bb = dummy.textbbox((0,0), lt, font=f)
-            w = bb[2]-bb[0]
-            ws.append(w)
-            total_w += w + 6
-    x = (W - total_w)//2
-    y_center = 300
-    for i, lt in enumerate(letters):
-        if lt.strip() == "":
+            bb=dummy.textbbox((0,0), lt, font=f)
+            w=bb[2]-bb[0]
+            ws.append(w); total+=w+6
+    x=(W-total)//2
+    y_center=canvas_h//2
+    for i,lt in enumerate(letters):
+        if lt.strip()=="":
             x+=14; continue
-        bg, txt = random.choice(PALETTE)
-        w_est = ws[i]
-        lw = w_est + 22
-        lh = 88
-        li = Image.new("RGBA", (lw, lh), (0,0,0,0))
-        ld = ImageDraw.Draw(li)
+        bg,txt = random.choice(PALETTE)
+        lw=ws[i]+22; lh=88 if fsize<=80 else 110
+        li=Image.new("RGBA",(lw,lh),(0,0,0,0))
+        ld=ImageDraw.Draw(li)
         ld.rectangle([0,0,lw,lh], fill=bg)
-        ld.text((11, 10), lt, font=f, fill=txt)
-        ang = random.uniform(-6, 6)
-        rot = li.rotate(ang, resample=Image.BICUBIC, expand=True)
-        y_off = y_center - rot.height//2 + random.randint(-6,6)
-        if y_off + rot.height > 590:
-            y_off = 590 - rot.height
-        if y_off < 5:
-            y_off = 5
-        img.alpha_composite(rot, (x, y_off))
-        x += lw - 6
+        ld.text((11,10), lt, font=f, fill=txt)
+        ang=random.uniform(-6,6)
+        rot=li.rotate(ang, resample=Image.BICUBIC, expand=True)
+        y_off=y_center-rot.height//2+random.randint(-5,5)
+        y_off=max(5, min(y_off, canvas_h-rot.height-5))
+        img.alpha_composite(rot,(x,y_off))
+        x+=lw-6
     img.save(path)
 
-def make_headline_legivel_bonita(path: Path, text: str):
-    img = Image.new("RGBA", (W, 780), (0,0,0,0))
+def make_headline_ransom_3_pills(path: Path, text: str):
+    # 3 PILULAS TODAS COM FUNDO COLORIDO + LETRA RANSOM QUE RETEM ATENÇÃO
+    img = Image.new("RGBA", (W, 820), (0,0,0,0))
     parts = text.upper().split()
     l1 = parts[0] if parts else "ACHADINHO"
     l2 = " ".join(parts[1:3]) if len(parts)>2 else "QUE FACILITA"
     l3 = " ".join(parts[3:5]) if len(parts)>3 else "SUA VIDA"
-    configs = [(l1, 130, ORANGE, "#000000"), (l2, 72, "black", "#FFEB3B"), (l3, 82, "white", ORANGE)]
-    y = 12
-    for idx, (line, fsize, txt_color, bg_color) in enumerate(configs):
-        f = font(fsize)
-        dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
-        bb = dummy.textbbox((0,0), line, font=f)
-        tw = bb[2]-bb[0] + 70
-        th = bb[3]-bb[1] + 30
-        pill = Image.new("RGBA", (tw+20, th+18), (0,0,0,0))
+    lines = [l1,l2,l3]
+    # Cores de fundo das pilulas - todas coloridas igual você pediu
+    pill_colors = ["#FFEB3B", "#FF6B00", "#FFFFFF"]  # amarelo, laranja, branco
+    y=15
+    for idx, line in enumerate(lines):
+        # Cria linha ransom 85pt
+        tmp_path = path.parent / f"hl_tmp_{idx}.png"
+        make_ransom_word(tmp_path, line, fsize=88, canvas_h=180)
+        line_img = Image.open(tmp_path)
+        # Cria pilula atrás
+        tw = line_img.width
+        # corta espaço vazio para pilula justa
+        bbox = line_img.getbbox()
+        if bbox:
+            line_cropped = line_img.crop(bbox)
+        else:
+            line_cropped = line_img
+        pill_w = line_cropped.width + 60
+        pill_h = line_cropped.height + 24
+        pill = Image.new("RGBA", (pill_w, pill_h), (0,0,0,0))
         pd = ImageDraw.Draw(pill)
-        pd.rounded_rectangle([6,8,tw+14,th+12], radius=16, fill=(0,0,0,180))
-        pd.rounded_rectangle([0,0,tw+8,th+6], radius=16, fill=bg_color)
-        pd.text((12, 6), line, font=f, fill=txt_color)
-        ang = [-2.0, 1.8, -0.8][idx]
+        pd.rounded_rectangle([5,7,pill_w-1,pill_h-3], radius=18, fill=(0,0,0,200))
+        pd.rounded_rectangle([0,0,pill_w-6,pill_h-8], radius=18, fill=pill_colors[idx])
+        # centraliza ransom dentro da pilula
+        px = (pill_w - line_cropped.width)//2
+        py = (pill_h - line_cropped.height)//2 - 4
+        pill.alpha_composite(line_cropped, (px, py))
+        ang = [-2.2, 1.9, -0.9][idx]
         rot = pill.rotate(ang, resample=Image.BICUBIC, expand=True)
         x = (W - rot.width)//2
         img.alpha_composite(rot, (x, y))
-        y += rot.height - 6
+        y += rot.height - 8
+        try:
+            tmp_path.unlink()
+        except:
+            pass
     img.save(path)
 
 def download(url: str, folder: Path) -> Path:
@@ -127,7 +138,7 @@ def probe(p: Path) -> float:
     except:
         return 9.0
 
-async def get_words(text: str, audio_path: Path):
+async def get_words_sync_zero(text: str, audio_path: Path):
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
     audio_bytes=bytearray(); raw=[]
     async for chunk in comm.stream():
@@ -143,19 +154,19 @@ async def get_words(text: str, audio_path: Path):
         raise RuntimeError("TTS sem audio")
     with audio_path.open("wb") as f:
         f.write(audio_bytes)
-    if not raw:
-        clean=text.split(); tpw=9.0/max(1,len(clean))
-        return [{"text":w,"start":i*tpw,"end":(i+1)*tpw} for i,w in enumerate(clean)], 9.0
-    last_raw=max(w["raw_end"] for w in raw)
     ad=probe(audio_path)
-    target=max(0.5, ad - 0.01)
-    scale=target/max(0.1, last_raw)
+    if not raw:
+        clean=text.split(); tpw=ad/max(1,len(clean))
+        return [{"text":w,"start":i*tpw,"end":(i+1)*tpw} for i,w in enumerate(clean)], ad
+    last_raw=max(w["raw_end"] for w in raw)
+    # SYNC ZERO: termina exatamente em ad
+    scale=ad/max(0.1, last_raw)
     words=[]
     for w in raw:
-        s=w["start"]*scale+0.03
-        e=w["raw_end"]*scale+0.03
-        if e-s<0.28:
-            e=s+0.28
+        s=w["start"]*scale
+        e=w["raw_end"]*scale
+        if e-s<0.26:
+            e=s+0.26
         words.append({"text":w["text"],"start":s,"end":e})
     return words, ad
 
@@ -163,7 +174,7 @@ def render(source, audio, headline, caps, words, out, dur):
     CAPTION_Y = int(H*0.68)
     filters=[f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]"]
     last="[bg]"; idx=0
-    filters.append(f"{last}[2:v]overlay=0:15[tmp{idx}]"); last=f"[tmp{idx}]"; idx+=1
+    filters.append(f"{last}[2:v]overlay=0:12[tmp{idx}]"); last=f"[tmp{idx}]"; idx+=1
     for i,w in enumerate(words):
         s=w["start"]; e=min(dur, w["end"])
         filters.append(f"{last}[{3+i}:v]overlay=(W-w)/2:{CAPTION_Y}:enable='between(t,{s:.3f},{e:.3f})'[tmp{idx}]")
@@ -186,14 +197,14 @@ def clean():
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V175.1 - FIX SYNTAX</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V175.1</a>")
+    return HTMLResponse("<h1>V176 - 3 PILULAS COLORIDAS + SYNC ZERO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V176</a>")
 
 @app.get("/health")
 def health():
     return {"status":"ok","version":VERSION}
 
 @app.get("/render-web")
-async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!")):
+async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO QUE FACILITA SUA VIDA")):
     clean()
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True)
     caps_dir=folder/"caps"; caps_dir.mkdir()
@@ -202,27 +213,21 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         audio=folder/"narr.mp3"
         txt="Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         tmp=folder/"tmp.mp3"
-        words, ad=await get_words(txt, tmp)
+        words, ad = await get_words_sync_zero(txt, tmp)
         import shutil
         shutil.copy(tmp, audio)
-        last=max(w["end"] for w in words)
-        scale=(ad - 0.01)/max(0.1, last-0.03)
-        final=[]
-        for w in words:
-            s=(w["start"]-0.03)*scale+0.03
-            e=(w["end"]-0.03)*scale+0.03
-            final.append({"text":w["text"],"start":s,"end":e})
-        dur = max(w["end"] for w in final) + 0.08
+        # ZERO ATRASO: dur = last end, sem +0.12
+        dur = max(w["end"] for w in words) + 0.05
         caps=[]
-        for i,w in enumerate(final):
+        for i,w in enumerate(words):
             p=caps_dir/f"cap_{i:03d}.png"
-            make_ransom_72pt_center(p, w["text"])
+            make_ransom_word(p, w["text"], fsize=72, canvas_h=600)
             caps.append(p)
         hl=folder/"head.png"
-        make_headline_legivel_bonita(hl, headline)
+        make_headline_ransom_3_pills(hl, headline)
         out=folder/"final.mp4"
-        render(src, audio, hl, caps, final, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v175_1.mp4")
+        render(src, audio, hl, caps, words, out, dur)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v176.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
