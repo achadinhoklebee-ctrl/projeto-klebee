@@ -18,7 +18,7 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import volumex
 
-app = FastAPI(title="Klebee Cloud Engine - V144 Pro Viral")
+app = FastAPI(title="Klebee Cloud Engine - V144 Stable")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -68,46 +68,42 @@ def carregar_fonte(tamanho):
                 pass
     return ImageFont.load_default()
 
-def criar_overlay_headline(texto, largura=1080, altura=240):
-    """Gera uma headline profissional superior grande, marcante e com contorno forte."""
+def criar_overlay_headline(texto, largura=1080, altura=200):
     img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = carregar_fonte(72)  # Aumentado para ter alto impacto visual
+    font = carregar_fonte(65)
     
-    linhas = textwrap.wrap(texto, width=20)
+    linhas = textwrap.wrap(texto, width=22)
     centro_x = largura // 2
     
-    current_y = 15
+    current_y = 10
     for linha in linhas:
         bbox = font.getbbox(linha)
         w = bbox[2] - bbox[0]
         h = bbox[3] - bbox[1]
         line_x = centro_x - (w // 2)
         
-        # Contorno / Sombra preta grossa
         offset = 4
         for dx in range(-offset, offset + 1):
             for dy in range(-offset, offset + 1):
                 if dx != 0 or dy != 0:
                     draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
         
-        # Texto principal em Amarelo Vivo
         draw.text((line_x, current_y), linha, font=font, fill="#FACC15")
-        current_y += h + 10
+        current_y += h + 6
         
     path_img = os.path.join(CACHE_AUDIO_DIR, f"headline_{abs(hash(texto))}.png")
     img.save(path_img)
     return path_img
 
-def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#FFFFFF"):
-    """Gera legenda dinâmica inferior com pill translúcida compacta e quebra automática real."""
+def criar_overlay_legenda_dinamica(texto, largura=1080, altura=240, cor_texto="#FFFFFF"):
     linhas = textwrap.wrap(texto, width=26)
     img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = carregar_fonte(52)
+    font = carregar_fonte(48)
     
-    pad_x = 35
-    pad_y = 18
+    pad_x = 30
+    pad_y = 15
     
     line_widths = []
     line_heights = []
@@ -117,17 +113,16 @@ def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#
         line_heights.append(bbox[3] - bbox[1])
     
     max_w = max(line_widths) if line_widths else 100
-    total_h = sum(line_heights) + (len(linhas) - 1) * 10
+    total_h = sum(line_heights) + (len(linhas) - 1) * 8
     
     box_w = max_w + (pad_x * 2)
     box_h = total_h + (pad_y * 2)
     box_x = (largura - box_w) // 2
     box_y = (altura - box_h) // 2
     
-    # Pill translúcida elegante
     draw.rounded_rectangle(
         [box_x, box_y, box_x + box_w, box_y + box_h],
-        radius=16,
+        radius=14,
         fill=(0, 0, 0, 210)
     )
     
@@ -144,7 +139,7 @@ def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#
                     draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
         
         draw.text((line_x, current_y), linha, font=font, fill=cor_texto)
-        current_y += h + 10
+        current_y += h + 8
         
     path_img = os.path.join(CACHE_AUDIO_DIR, f"leg_{abs(hash(texto))}.png")
     img.save(path_img)
@@ -157,7 +152,7 @@ def home():
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
-        <title>Super Robô Klebee - Cloud Engine V144 Pro</title>
+        <title>Super Robô Klebee - Cloud Engine V144</title>
         <style>
             body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
             .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
@@ -169,9 +164,9 @@ def home():
     </head>
     <body>
         <div class="card">
-            <h1>🚀 Super Robô Klebee V144 Pro</h1>
+            <h1>🚀 Super Robô Klebee V144</h1>
             <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
-            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO PROFISSIONAL</a>
+            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
         </div>
     </body>
     </html>
@@ -187,7 +182,7 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
         narracao_audio = AudioFileClip(audio_voz_path)
         
-        duracao_alvo = float(narracao_audio.duration) + 0.5
+        duracao_alvo = float(narracao_audio.duration) + 0.3
         
         if base_clip.duration < duracao_alvo:
             repeats = int(duracao_alvo / base_clip.duration) + 1
@@ -208,11 +203,9 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         else:
             audio_final = narracao_audio.fx(volumex, 1.2)
 
-        # 1. Headline no topo com tamanho dominante
         path_head = criar_overlay_headline("🚨 ACHADINHO INCRÍVEL!")
-        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 150))
+        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 140))
 
-        # 2. Legendas dinâmicas sincronizadas
         partes_legenda = [
             ("Olha esse achadinho incrível para sua casa!", 0.0, 3.2, "#FFFFFF"),
             ("Prático, moderno e vai facilitar", 3.2, 6.5, "#FACC15"),
@@ -229,7 +222,7 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
             if dur <= 0:
                 continue
             path_leg = criar_overlay_legenda_dinamica(texto_bloco, cor_texto=cor)
-            leg_clip = ImageClip(path_leg).set_start(inicio).set_duration(dur).set_pos(('center', 1350))
+            leg_clip = ImageClip(path_leg).set_start(inicio).set_duration(dur).set_pos(('center', 1400))
             clips_legendas.append(leg_clip)
 
         video_final = CompositeVideoClip([video_base] + clips_legendas, size=(1080, 1920))
@@ -243,8 +236,8 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
             fps=24,
             codec="libx264",
             audio_codec="aac",
-            preset="fast",
-            threads=4,
+            preset="ultrafast",  # Renderização super rápida para evitar timeout no Railway
+            threads=2,
             logger=None
         )
 
