@@ -1,20 +1,19 @@
 
 """
-VIDEO-AUTORAL V177 - APENAS 2 CORRECOES DO V176 APROVADO
-1. Headline sempre 2 linhas (era 3)
-2. Legenda 58% (1113px) acima do link Shopee (era 68% 1305px)
-SEM valores, SEM parafusadeira, SEM avatar - so VIDEO-AUTORAL
+VIDEO-AUTORAL V177 FIX OOM - 1 OVERLAY SO - 2 LINHAS + LEGENDA 58%
+Fix erro -11 Resource temporarily unavailable (34 overlays)
+Agora: gera 1 unico video de legendas (caps_video.mp4) e faz so 2 overlays
 """
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time, random
 from pathlib import Path
 import edge_tts
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V177-AUTORAL-2L-58"
+VERSION = "V177-FIX-OOM-2L-58"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -22,7 +21,6 @@ JOBS.mkdir(parents=True, exist_ok=True)
 W, H = 1080, 1920
 VOICE = "pt-BR-FranciscaNeural"
 RATE = "+10%"
-# CORRECAO 2: Legenda sobe de 68% para 58% - acima do card Shopee da foto 2
 CAPTION_Y = int(H * 0.58)
 HEADLINE_Y = 12
 
@@ -30,7 +28,7 @@ PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="Video Autoral V177", version=VERSION)
+app = FastAPI(title="Video Autoral V177 Fix OOM", version=VERSION)
 
 def binary(n: str):
     import shutil
@@ -38,11 +36,11 @@ def binary(n: str):
     if not p: raise RuntimeError(n)
     return p
 
-def run(args, timeout=500):
+def run(args, timeout=600):
     import subprocess
     p=subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
-        raise RuntimeError((p.stderr or p.stdout)[-2000:])
+        raise RuntimeError((p.stderr or p.stdout)[-3000:])
     return p
 
 def font(sz):
@@ -87,10 +85,8 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600):
     img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
-    """V177 CORRECAO 1: Sempre 2 linhas - texto novo que cabe"""
     img=Image.new("RGBA",(W,380),(0,0,0,0))
     parts=text.upper().split()
-    # Forca 2 linhas: metade/metade
     if len(parts)<=2:
         l1=parts[0] if parts else "ACHADINHO"
         l2=" ".join(parts[1:]) if len(parts)>1 else "INCRIVEL"
@@ -99,7 +95,7 @@ def make_headline_2lines(path: Path, text: str):
         l1=" ".join(parts[:mid])
         l2=" ".join(parts[mid:])
     lines=[l1,l2]
-    pill_colors=["#FFEB3B","#FF6B00"]  # 2 pilulas
+    pill_colors=["#FFEB3B","#FF6B00"]
     y=10
     for idx,line in enumerate(lines):
         fsize=88
@@ -126,6 +122,39 @@ def make_headline_2lines(path: Path, text: str):
         try: tmp.unlink()
         except: pass
     img.save(path)
+
+def make_caps_video(caps: list[Path], words: list[dict], out: Path, dur: float):
+    """
+    FIX OOM: ao inves de 34 overlays, cria 1 unico video de legendas
+    com fundo transparente, depois overlay 1 vez so
+    """
+    # Cria frames a 10 fps (menos memoria que 30)
+    fps = 10
+    total_frames = int(dur * fps) + 2
+    frames_dir = out.parent / "caps_frames"
+    frames_dir.mkdir(exist_ok=True)
+    # Mapeia tempo -> indice do cap ativo
+    for f_idx in range(total_frames):
+        t = f_idx / fps
+        active = None
+        for i,w in enumerate(words):
+            if w["start"] <= t <= w["end"]:
+                active = i
+                break
+        frame_path = frames_dir / f"f_{f_idx:04d}.png"
+        if active is not None:
+            # Copia o cap correspondente
+            shutil.copy(caps[active], frame_path)
+        else:
+            # Frame vazio transparente
+            Image.new("RGBA",(W,600),(0,0,0,0)).save(frame_path)
+    # Codifica frames em video com alpha (png codec preserva alpha)
+    run([
+        binary("ffmpeg"),"-y","-framerate",str(fps),"-i",str(frames_dir/"f_%04d.png"),
+        "-c:v","png","-pix_fmt","rgba","-t",f"{dur:.2f}",str(out)
+    ], 600)
+    # Limpa frames
+    shutil.rmtree(frames_dir, ignore_errors=True)
 
 async def get_words(text: str, audio_path: Path):
     comm=edge_tts.Communicate(text, VOICE, rate=RATE)
@@ -165,44 +194,37 @@ def download(url: str, folder: Path):
     if not cands: raise RuntimeError("Sem video")
     return max(cands, key=lambda p:p.stat().st_size)
 
-def render_final(source, audio, headline, caps, words, out, dur):
-    filters=[f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]"]
-    last="[bg]"; idx=0
-    filters.append(f"{last}[2:v]overlay=0:{HEADLINE_Y}[tmp{idx}]"); last=f"[tmp{idx}]"; idx+=1
-    for i,w in enumerate(words):
-        s=w["start"]; e=min(dur,w["end"])
-        filters.append(f"{last}[{3+i}:v]overlay=(W-w)/2:{CAPTION_Y}:enable='between(t,{s:.3f},{e:.3f})'[tmp{idx}]")
-        last=f"[tmp{idx}]"; idx+=1
-    filters.append("[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]")
+def render_final_fix(source, audio, headline, caps_video, out, dur):
+    # FIX: apenas 2 overlays, nao 34
+    filters=[
+        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
+        f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
+        f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[final]",
+        "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
+    ]
     fc=";".join(filters)
-    cmd=[binary("ffmpeg"),"-y","-threads","2","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",str(headline)]
-    for p in caps: cmd.extend(["-i",str(p)])
-    cmd.extend(["-filter_complex",fc,"-map",last,"-map","[a]","-t",f"{dur:.2f}","-threads","2","-c:v","libx264","-preset","ultrafast","-crf","26","-x264-params","threads=2","-c:a","aac","-b:a","128k",str(out)])
-    run(cmd,500)
+    cmd=[binary("ffmpeg"),"-y","-threads","2","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",str(headline),"-i",str(caps_video),
+         "-filter_complex",fc,"-map","[final]","-map","[a]","-t",f"{dur:.2f}","-threads","2","-c:v","libx264","-preset","ultrafast","-crf","26","-c:a","aac","-b:a","128k",str(out)]
+    run(cmd,600)
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return """
-    <h1>V177 AUTORAL - 2 LINHAS + LEGENDA 58%</h1>
-    <p>Headline sempre 2 linhas | Legenda 58% acima link Shopee (era 68%)</p>
+    return f"""
+    <h1>{VERSION}</h1>
+    <p>FIX OOM - 1 overlay so | Headline 2 linhas | Legenda 58% acima Shopee</p>
     <a href='/render'><h2>GERAR VIDEO AUTORAL FINAL</h2></a>
-    <p>Clica e já baixa o video igual antes</p>
     """
 
 @app.get("/health")
 def health():
-    return {"version":VERSION,"caption_y":CAPTION_Y,"headline":"2 linhas"}
+    return {"version":VERSION,"fix":"1 overlay","caption_y":CAPTION_Y,"headline":"2 linhas"}
 
 @app.get("/render")
 async def render():
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True); caps_dir=folder/"caps"; caps_dir.mkdir()
     try:
-        # Video fonte do achadinho - TikTok original (igual V176)
-        src_url="https://www.tiktok.com/@carey_collections/video/7688751450901597461"
-        src=download(src_url, folder)
-        # Roteiro sem valores - do organizador que vc mandou
+        src=download("https://www.tiktok.com/@carey_collections/video/7688751450901597461", folder)
         roteiro="Olha esse organizador de gaveta que vai transformar sua cozinha! Bambu natural, cinco compartimentos, resistente e elegante. Organiza talheres, utensilios e deixa tudo no lugar. Corre no link e garanta o seu!"
-        # Headline nova 2 linhas sem valores
         headline_text="ACHADINHO QUE ORGANIZA"
         audio_tmp=folder/"tmp.mp3"; audio_final=folder/"narr.mp3"
         words, ad = await get_words(roteiro, audio_tmp)
@@ -213,17 +235,19 @@ async def render():
             p=caps_dir/f"cap_{i:03d}.png"
             make_ransom_word(p,w["text"],fsize=72,canvas_h=600)
             caps.append(p)
+        # Cria 1 unico video de legendas (FIX OOM)
+        caps_video=folder/"caps_video.mov"
+        make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
         out=folder/"final_v177.mp4"
-        render_final(src, audio_final, hl, caps, words, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_autoral_v177_2linhas_58.mp4")
+        render_final_fix(src, audio_final, hl, caps_video, out, dur)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_autoral_v177_fix_2linhas_58.mp4")
     except Exception as e:
         print(traceback.format_exc())
-        raise HTTPException(500, f"Erro V177: {e}")
+        raise HTTPException(500, f"Erro V177 FIX: {e}")
 
 if __name__=="__main__":
     import uvicorn, os
     port=int(os.getenv("PORT","8000"))
-    print(f"{VERSION} CAPTION_Y={CAPTION_Y} 2 linhas")
     uvicorn.run(app, host="0.0.0.0", port=port)
