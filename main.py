@@ -252,17 +252,28 @@ def montar_clips_legenda(words, duracao):
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
-    <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Super Robô Klebee</title>
-    <style>
-    body{background:#0f172a;color:#f8fafc;font-family:Arial,sans-serif;text-align:center;padding:50px 15px}
-    .card{background:#1e293b;padding:32px;border-radius:16px;display:inline-block;max-width:650px}
-    h1{color:#38bdf8}p{color:#cbd5e1}.btn{background:#22c55e;color:white;padding:16px 24px;
-    text-decoration:none;border-radius:10px;font-weight:bold;display:inline-block}
-    </style></head><body><div class="card"><h1>Super Robô Klebee</h1>
-    <p>Gerador de vídeos verticais com narração e legendas dinâmicas.</p>
-    <p>Use /render?video_url=URL_DO_TIKTOK para renderizar um vídeo.</p></div></body></html>
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Super Robô Klebee - Cloud Engine V144 Pro</title>
+        <style>
+            body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
+            .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h1 { color: #38bdf8; font-size: 32px; margin-bottom: 10px; }
+            p { color: #94a3b8; font-size: 18px; margin-bottom: 30px; }
+            .btn { background: #22c55e; color: white; padding: 18px 36px; font-size: 20px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block; transition: 0.3s; }
+            .btn:hover { background: #16a34a; transform: scale(1.03); }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🚀 Super Robô Klebee V144</h1>
+            <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
+            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
+        </div>
+    </body>
+    </html>
     """
 
 
