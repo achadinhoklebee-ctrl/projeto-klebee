@@ -1,11 +1,12 @@
 
 """
-VIDEO-AUTORAL V177 FIX OOM - 1 OVERLAY SO - 2 LINHAS + LEGENDA 58%
-Fix erro -11 Resource temporarily unavailable (34 overlays)
-Agora: gera 1 unico video de legendas (caps_video.mp4) e faz so 2 overlays
+VIDEO-AUTORAL V177b - FIX CORTE HEADLINE E LEGENDA COMPARTIMENTOS
+Fix: 
+1. Headline letras sobrando embaixo - centraliza e aumenta canvas
+2. Legenda COMPARTIMENTOS corta direita - auto-fit reduz fonte se palavra longa
 """
 from __future__ import annotations
-import os, shutil, subprocess, uuid, traceback, time, random
+import os, shutil, subprocess, uuid, traceback, random
 from pathlib import Path
 import edge_tts
 from fastapi import FastAPI, HTTPException
@@ -13,7 +14,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V177-FIX-OOM-2L-58"
+VERSION = "V177-FINAL-2L-58-TUDO-CORRIGIDO"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -28,7 +29,7 @@ PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="Video Autoral V177 Fix OOM", version=VERSION)
+app = FastAPI(title="Video Autoral V177b Fix Corte", version=VERSION)
 
 def binary(n: str):
     import shutil
@@ -52,88 +53,117 @@ def font(sz):
                 pass
     return ImageFont.load_default()
 
-def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600):
-    f=font(fsize)
-    img=Image.new("RGBA",(W,canvas_h),(0,0,0,0))
-    letters=list(word.upper())
-    ws=[]; total=0
-    dummy=ImageDraw.Draw(Image.new("RGBA",(1,1)))
-    for lt in letters:
-        if lt.strip()=="":
-            ws.append(14); total+=14
-        else:
-            try:
-                bb=dummy.textbbox((0,0),lt,font=f)
-                w=bb[2]-bb[0]
-            except:
-                w=fsize*0.6
-            ws.append(w); total+=w+6
-    x=(W-total)//2
-    y_center=canvas_h//2
-    for i,lt in enumerate(letters):
-        if lt.strip()=="":
-            x+=14; continue
-        bg,txt=random.choice(PALETTE)
-        lw=int(ws[i]+22); lh=88
-        li=Image.new("RGBA",(lw,lh),(0,0,0,0))
-        ImageDraw.Draw(li).rectangle([0,0,lw,lh],fill=bg)
-        ImageDraw.Draw(li).text((11,10),lt,font=f,fill=txt)
-        rot=li.rotate(random.uniform(-6,6), resample=Image.BICUBIC, expand=True)
-        y_off=max(5, min(y_center-rot.height//2+random.randint(-5,5), canvas_h-rot.height-5))
-        img.alpha_composite(rot,(int(x),int(y_off)))
-        x+=lw-6
+def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=1080):
+    """
+    FIX CORTE: auto-fit se palavra longa tipo COMPARTIMENTOS
+    Reduz fonte ate caber em W-40
+    """
+    # Tenta reduzir fonte se palavra muito longa
+    cur_fsize = fsize
+    for attempt in range(5):
+        f = font(cur_fsize)
+        dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
+        letters = list(word.upper())
+        ws = []
+        total = 0
+        for lt in letters:
+            if lt.strip() == "":
+                ws.append(40)
+                total += 40
+            else:
+                try:
+                    bb = dummy.textbbox((0,0), lt, font=f)
+                    w = bb[2]-bb[0]
+                except:
+                    w = cur_fsize*0.6
+                ws.append(w)
+                total += w + 6
+        if total <= canvas_w - 40 or cur_fsize <= 48:
+            break
+        cur_fsize -= 8  # reduz e tenta de novo
+    
+    f = font(cur_fsize)
+    img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
+    x = (canvas_w - total)//2
+    y_center = canvas_h//2
+    for i, lt in enumerate(list(word.upper())):
+        if lt.strip() == "":
+            x += 14
+            continue
+        bg, txt = random.choice(PALETTE)
+        lw = int(ws[i] + 22)
+        lh = int(cur_fsize * 1.2) + 12
+        li = Image.new("RGBA", (lw, lh), (0,0,0,0))
+        ImageDraw.Draw(li).rectangle([0,0,lw,lh], fill=bg)
+        # Centraliza letra na caixinha
+        try:
+            bb = ImageDraw.Draw(Image.new("RGBA",(1,1))).textbbox((0,0), lt, font=f)
+            tw = bb[2]-bb[0]
+            th = bb[3]-bb[1]
+        except:
+            tw = cur_fsize*0.6
+            th = cur_fsize
+        tx = (lw - tw)//2
+        ty = (lh - th)//2 - 2
+        ImageDraw.Draw(li).text((tx, ty), lt, font=f, fill=txt)
+        rot = li.rotate(random.uniform(-5,5), resample=Image.BICUBIC, expand=True)
+        # FIX: garante que nao corta embaixo - margem 20px
+        y_off = y_center - rot.height//2 + random.randint(-4,4)
+        y_off = max(15, min(y_off, canvas_h - rot.height - 15))
+        img.alpha_composite(rot, (int(x), int(y_off)))
+        x += lw - 6
     img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
-    img=Image.new("RGBA",(W,380),(0,0,0,0))
-    parts=text.upper().split()
-    if len(parts)<=2:
-        l1=parts[0] if parts else "ACHADINHO"
-        l2=" ".join(parts[1:]) if len(parts)>1 else "INCRIVEL"
+    """FIX CORTE HEADLINE: aumenta canvas e centraliza melhor"""
+    img = Image.new("RGBA", (W, 420), (0,0,0,0))
+    parts = text.upper().split()
+    if len(parts) <= 2:
+        l1 = parts[0] if parts else "ACHADINHO"
+        l2 = " ".join(parts[1:]) if len(parts)>1 else "INCRIVEL"
     else:
-        mid=len(parts)//2
-        l1=" ".join(parts[:mid])
-        l2=" ".join(parts[mid:])
-    lines=[l1,l2]
-    pill_colors=["#FFEB3B","#FF6B00"]
-    y=10
-    for idx,line in enumerate(lines):
-        fsize=88
-        if len(line)>18: fsize=72
-        if len(line)>26: fsize=58
-        tmp=path.parent / f"hl_{idx}_{uuid.uuid4().hex[:3]}.png"
-        make_ransom_word(tmp,line,fsize=fsize,canvas_h=160)
+        mid = len(parts)//2
+        l1 = " ".join(parts[:mid])
+        l2 = " ".join(parts[mid:])
+    lines = [l1, l2]
+    pill_colors = ["#FFEB3B", "#FF6B00"]
+    y = 12
+    for idx, line in enumerate(lines):
+        fsize = 88
+        if len(line) > 18: fsize = 72
+        if len(line) > 26: fsize = 58
+        tmp = path.parent / f"hl_{idx}_{uuid.uuid4().hex[:3]}.png"
+        # FIX: canvas_h maior 200 pra nao cortar embaixo
+        make_ransom_word(tmp, line, fsize=fsize, canvas_h=200, canvas_w=W)
         try:
-            li=Image.open(tmp)
+            li = Image.open(tmp)
         except:
             continue
-        bbox=li.getbbox()
-        crop=li.crop(bbox) if bbox else li
-        pw=crop.width+60; ph=crop.height+24
-        if pw>W-20: pw=W-20
-        pill=Image.new("RGBA",(pw,ph),(0,0,0,0))
-        pd=ImageDraw.Draw(pill)
-        pd.rounded_rectangle([5,7,pw-1,ph-3],radius=18,fill=(0,0,0,200))
-        pd.rounded_rectangle([0,0,pw-6,ph-8],radius=18,fill=pill_colors[idx])
-        pill.alpha_composite(crop,((pw-crop.width)//2,(ph-crop.height)//2-4))
-        rot=pill.rotate([-2.2,1.9][idx],resample=Image.BICUBIC,expand=True)
-        img.alpha_composite(rot,((W-rot.width)//2,y))
-        y+=rot.height-6
+        bbox = li.getbbox()
+        crop = li.crop(bbox) if bbox else li
+        pw = crop.width + 70
+        ph = crop.height + 36  # mais altura pra nao cortar
+        if pw > W - 20: pw = W - 20
+        pill = Image.new("RGBA", (pw, ph), (0,0,0,0))
+        pd = ImageDraw.Draw(pill)
+        pd.rounded_rectangle([6,8,pw-2,ph-4], radius=18, fill=(0,0,0,200))
+        pd.rounded_rectangle([0,0,pw-8,ph-10], radius=18, fill=pill_colors[idx])
+        # Centraliza crop na pilula com margem
+        px = (pw - crop.width)//2
+        py = (ph - crop.height)//2 - 2
+        pill.alpha_composite(crop, (px, py))
+        rot = pill.rotate([-2.2, 1.9][idx], resample=Image.BICUBIC, expand=True)
+        img.alpha_composite(rot, ((W-rot.width)//2, y))
+        y += rot.height - 4  # menos sobreposicao pra nao cortar
         try: tmp.unlink()
         except: pass
     img.save(path)
 
 def make_caps_video(caps: list[Path], words: list[dict], out: Path, dur: float):
-    """
-    FIX OOM: ao inves de 34 overlays, cria 1 unico video de legendas
-    com fundo transparente, depois overlay 1 vez so
-    """
-    # Cria frames a 10 fps (menos memoria que 30)
     fps = 10
     total_frames = int(dur * fps) + 2
     frames_dir = out.parent / "caps_frames"
     frames_dir.mkdir(exist_ok=True)
-    # Mapeia tempo -> indice do cap ativo
     for f_idx in range(total_frames):
         t = f_idx / fps
         active = None
@@ -143,17 +173,10 @@ def make_caps_video(caps: list[Path], words: list[dict], out: Path, dur: float):
                 break
         frame_path = frames_dir / f"f_{f_idx:04d}.png"
         if active is not None:
-            # Copia o cap correspondente
             shutil.copy(caps[active], frame_path)
         else:
-            # Frame vazio transparente
             Image.new("RGBA",(W,600),(0,0,0,0)).save(frame_path)
-    # Codifica frames em video com alpha (png codec preserva alpha)
-    run([
-        binary("ffmpeg"),"-y","-framerate",str(fps),"-i",str(frames_dir/"f_%04d.png"),
-        "-c:v","png","-pix_fmt","rgba","-t",f"{dur:.2f}",str(out)
-    ], 600)
-    # Limpa frames
+    run([binary("ffmpeg"),"-y","-framerate",str(fps),"-i",str(frames_dir/"f_%04d.png"),"-c:v","png","-pix_fmt","rgba","-t",f"{dur:.2f}",str(out)],600)
     shutil.rmtree(frames_dir, ignore_errors=True)
 
 async def get_words(text: str, audio_path: Path):
@@ -195,7 +218,6 @@ def download(url: str, folder: Path):
     return max(cands, key=lambda p:p.stat().st_size)
 
 def render_final_fix(source, audio, headline, caps_video, out, dur):
-    # FIX: apenas 2 overlays, nao 34
     filters=[
         f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
         f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
@@ -209,15 +231,11 @@ def render_final_fix(source, audio, headline, caps_video, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"""
-    <h1>{VERSION}</h1>
-    <p>FIX OOM - 1 overlay so | Headline 2 linhas | Legenda 58% acima Shopee</p>
-    <a href='/render'><h2>GERAR VIDEO AUTORAL FINAL</h2></a>
-    """
+    return f"<h1>{VERSION}</h1><p>Fix corte headline + legenda COMPARTIMENTOS | 2 linhas | 58%</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
-    return {"version":VERSION,"fix":"1 overlay","caption_y":CAPTION_Y,"headline":"2 linhas"}
+    return {"version":VERSION,"fix":"corte headline e COMPARTIMENTOS","caption_y":CAPTION_Y}
 
 @app.get("/render")
 async def render():
@@ -233,19 +251,18 @@ async def render():
         caps=[]
         for i,w in enumerate(words):
             p=caps_dir/f"cap_{i:03d}.png"
-            make_ransom_word(p,w["text"],fsize=72,canvas_h=600)
+            make_ransom_word(p,w["text"],fsize=72,canvas_h=600,canvas_w=W)
             caps.append(p)
-        # Cria 1 unico video de legendas (FIX OOM)
         caps_video=folder/"caps_video.mov"
         make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
-        out=folder/"final_v177.mp4"
+        out=folder/"final_v177b.mp4"
         render_final_fix(src, audio_final, hl, caps_video, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_autoral_v177_fix_2linhas_58.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v177b_fix_corte_2linhas_58.mp4")
     except Exception as e:
         print(traceback.format_exc())
-        raise HTTPException(500, f"Erro V177 FIX: {e}")
+        raise HTTPException(500, f"Erro V177b: {e}")
 
 if __name__=="__main__":
     import uvicorn, os
