@@ -15,8 +15,8 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import volumex, audio_fadein, audio_fadeout
 
-APP_VERSION = "KLEBEE-STABLE-PIL-FIX-2026-10-27-03"
-app = FastAPI(title="Klebee Cloud Engine - Stable PIL Fixed", version=APP_VERSION)
+APP_VERSION = "KLEBEE-PREMIERE-STYLE-2026-10-27-04"
+app = FastAPI(title="Klebee Cloud Engine - Premiere Style", version=APP_VERSION)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -30,7 +30,7 @@ VOICE_RATE = "+15%"
 HEADLINE_Y = 180
 CAPTION_Y = 1350
 CAPTION_H = 260
-SIDE_MARGIN = 120  # Aumentado para dar margem segura e não cortar nas pontas
+SIDE_MARGIN = 90
 
 
 def baixar_video_tiktok(url_tiktok: str) -> str:
@@ -148,22 +148,29 @@ def criar_overlay_headline(texto: str, largura=WIDTH, altura=250) -> str:
     img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     max_width = largura - (2 * SIDE_MARGIN)
-    font_size = 72
-    while font_size >= 40:
+    font_size = 76
+    while font_size >= 42:
         font = carregar_fonte(font_size)
         linhas = quebrar_por_pixels(draw, texto.split(), font, max_width)
         if len(linhas) <= 2 and all(medir(draw, line, font)[0] <= max_width for line in linhas):
             break
         font_size -= 2
     line_heights = [medir(draw, line, font)[1] for line in linhas]
-    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 6
+    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 7
     y = max(5, (altura - total_h) // 2)
     for linha, h in zip(linhas, line_heights):
         w, _ = medir(draw, linha, font)
         x = (largura - w) // 2
-        draw.text((x, y), linha, font=font, fill="#FFE500",
-                  stroke_width=5, stroke_fill="#111111")
-        y += h + 6
+        
+        # Contorno preto grosso (estilo Premiere Pro / Hormozi)
+        offset = 4
+        for dx in range(-offset, offset + 1):
+            for dy in range(-offset, offset + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), linha, font=font, fill=(0, 0, 0, 255))
+        
+        draw.text((x, y), linha, font=font, fill="#FFE500")
+        y += h + 7
     path = os.path.join(CACHE_AUDIO_DIR, "headline_" +
                         hashlib.md5(texto.encode("utf-8")).hexdigest() + ".png")
     img.save(path)
@@ -172,16 +179,18 @@ def criar_overlay_headline(texto: str, largura=WIDTH, altura=250) -> str:
 
 def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
                                     altura=CAPTION_H) -> str:
+    """Renderiza a legenda sem caixa preta, usando apenas texto grosso, contorno e sombra (Estilo Premiere Pro)."""
     palavras = [limpar_texto_visual(w) for w in palavras_grupo]
     palavras = [w for w in palavras if w]
     if not palavras:
         palavras = [" "]
+    
     img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # Margem lateral mais segura para evitar que o texto estoure as pontas
-    max_width = largura - (2 * SIDE_MARGIN) - 30
-    font_size = 48  # Reduzido levemente para caber perfeitamente sem cortar
-    while font_size >= 30:
+    max_width = largura - (2 * SIDE_MARGIN)
+    font_size = 60  # Fonte grande e impactante igual ao Premiere
+    
+    while font_size >= 36:
         font = carregar_fonte(font_size)
         linhas = []
         linha_indices = []
@@ -204,34 +213,39 @@ def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
             break
         font_size -= 2
 
-    pad_x, pad_y, gap = 24, 14, 8
-    box_w = min(largura - (2 * SIDE_MARGIN), max(widths, default=100) + (2 * pad_x))
-    box_h = sum(heights) + max(0, len(heights)-1) * gap + (2 * pad_y)
-    bx, by = (largura - box_w) // 2, (altura - box_h) // 2
-    draw.rounded_rectangle((bx, by, bx + box_w, by + box_h), radius=16,
-                           fill=(0, 0, 0, 200))
-    y = by + pad_y
+    total_h = sum(heights) + max(0, len(heights) - 1) * 10
+    y = (altura - total_h) // 2
+    
     for line, ids, h in zip(linhas, linha_indices, heights):
         widths_words = [medir(draw, word, font)[0] for word in line]
         spaces = medir(draw, " ", font)[0]
         line_w = sum(widths_words) + spaces * max(0, len(line) - 1)
         x = (largura - line_w) // 2
+        
         for word, idx, ww in zip(line, ids, widths_words):
+            # Amarelo vibrante para a palavra falada no momento, Branco para as outras
             color = "#FFE500" if idx == indice_ativo else "#FFFFFF"
-            draw.text((x, y), word, font=font, fill=color,
-                      stroke_width=2, stroke_fill="#111111")
+            
+            # Contorno e sombra preta grossa em volta de cada palavra individual
+            offset = 3
+            for dx in range(-offset, offset + 1):
+                for dy in range(-offset, offset + 1):
+                    if dx != 0 or dy != 0:
+                        draw.text((x + dx, y + dy), word, font=font, fill=(0, 0, 0, 255))
+            
+            draw.text((x, y), word, font=font, fill=color)
             x += ww + spaces
-        y += h + gap
+        y += h + 10
 
     key = hashlib.md5(( "|".join(palavras) + f"_{indice_ativo}_{font_size}" ).encode("utf-8")).hexdigest()
-    path = os.path.join(CACHE_AUDIO_DIR, f"caption_{key}.png")
+    path = os.path.join(CACHE_AUDIO_DIR, f"caption_clean_{key}.png")
     img.save(path)
     return path
 
 
 def montar_clips_legenda(words, duracao):
     clips = []
-    group_size = 3  # Reduzido para 3 palavras por bloco para evitar frases longas na tela
+    group_size = 3  # Blocos curtos e dinâmicos
     for group_start in range(0, len(words), group_size):
         group = words[group_start:group_start + group_size]
         for local_idx, word in enumerate(group):
@@ -288,7 +302,7 @@ def health():
 def version():
     return {
         "app_version": APP_VERSION,
-        "caption_mode": "PIL-safe-margins-fixed",
+        "caption_mode": "PIL-premiere-style-no-boxes",
     }
 
 
@@ -351,7 +365,7 @@ def render(video_url: str = Query(
                                          size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
         clips_to_close.append(video_final)
 
-        output_name = f"klebee_stable_fix_{os.urandom(4).hex()}.mp4"
+        output_name = f"klebee_premiere_{os.urandom(4).hex()}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_name)
         
         video_final.write_videofile(
