@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V170.1 - FIX NOME FUNCAO - 【entity-SHOPEE¦canonical_name=SHOPEE】 LARANJA - DEFINITIVO"""
+"""Super Robô Klebee — V171 - DEFINITIVO - FIX AUDIO 8S + HEADLINE PRINT 4 100% - SHOPEE LARANJA"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V170.1-FIX-NOME"
+VERSION = "KLEBEE-V171-DEFINITIVO-FINAL"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -46,8 +46,9 @@ def font(sz: int):
                 pass
     return ImageFont.load_default()
 
-def make_headline_shopee(path: Path, text: str):
-    img = Image.new("RGBA", (W, 700), (0,0,0,0))
+def make_headline_print4_definitiva(path: Path, text: str):
+    # PRINT 4: TODO MUNDO odeia NARRAR VIDEO - 140PT + TORTA + SOMBRA DUPLA
+    img = Image.new("RGBA", (W, 750), (0,0,0,0))
     d = ImageDraw.Draw(img)
     f = font(140)
     words = text.upper().split()
@@ -55,7 +56,7 @@ def make_headline_shopee(path: Path, text: str):
     for w in words:
         cand = f"{cur} {w}".strip()
         bb = d.textbbox((0,0), cand, font=f, stroke_width=22)
-        if bb[2]-bb[0] <= W-60:
+        if bb[2]-bb[0] <= W-50:
             cur = cand
         else:
             if cur:
@@ -64,14 +65,27 @@ def make_headline_shopee(path: Path, text: str):
     if cur:
         lines.append(cur)
     lines = lines[:3]
-    y = 15
-    for line in lines:
-        bb = d.textbbox((0,0), line, font=f, stroke_width=22)
+    
+    # Cria imagem maior para rotacionar linhas levemente
+    y = 25
+    for idx, line in enumerate(lines):
+        # Linha individual para rotacionar 1.5° estilo Hormozi
+        line_img = Image.new("RGBA", (W, 200), (0,0,0,0))
+        ld = ImageDraw.Draw(line_img)
+        bb = ld.textbbox((0,0), line, font=f, stroke_width=22)
         x = (W - (bb[2]-bb[0])) // 2
-        d.text((x+6,y+6), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
-        d.text((x+3,y+3), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
-        d.text((x,y), line, font=f, fill=SHOPEE_ORANGE, stroke_width=22, stroke_fill="black")
-        y += bb[3]-bb[1]+22
+        
+        # 3 camadas: sombra 6px + stroke 22px + fill laranja
+        ld.text((x+7,y+7), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
+        ld.text((x+3,y+3), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
+        ld.text((x,y), line, font=f, fill=SHOPEE_ORANGE, stroke_width=22, stroke_fill="black")
+        
+        # Rotação leve alternada: -1.5°, +1.5°, -1° igual print 4 torto
+        angle = -1.5 if idx==0 else (1.5 if idx==1 else -1.0)
+        rotated = line_img.rotate(angle, resample=Image.BICUBIC, expand=False)
+        img.alpha_composite(rotated, (0,0))
+        y += bb[3]-bb[1]+28
+    
     img.save(path)
 
 def ass_time(s: float) -> str:
@@ -83,7 +97,6 @@ def esc(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
 def make_ass_shopee_70pct(path: Path, words, duration: float):
-    # COR LARANJA 【entity-SHOPEE¦canonical_name=SHOPEE】 + 70% ALTURA
     header = """[Script Info]
 PlayResX: 1080
 PlayResY: 1920
@@ -119,7 +132,7 @@ def probe(p: Path) -> float:
     try:
         return float(r.stdout.strip())
     except:
-        return 10.0
+        return 9.0
 
 async def get_words_real_timing(text: str, audio_path: Path):
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
@@ -140,19 +153,19 @@ async def get_words_real_timing(text: str, audio_path: Path):
         f.write(audio_bytes)
     if not raw_words:
         clean = text.split()
-        tpw = 10.0 / max(1, len(clean))
-        return [{"text": w, "start": i*tpw, "end": (i+1)*tpw} for i,w in enumerate(clean)], 10.0
+        tpw = 9.0 / max(1, len(clean))
+        return [{"text": w, "start": i*tpw, "end": (i+1)*tpw} for i,w in enumerate(clean)], 9.0
     
     last_raw = max(w["raw_end"] for w in raw_words)
     audio_dur = probe(audio_path)
-    target_end = max(0.5, audio_dur - 0.25)
+    target_end = max(0.5, audio_dur - 0.15)
     scale = target_end / max(0.1, last_raw)
     words = []
     for w in raw_words:
-        s = w["start"] * scale + 0.15
-        e = w["raw_end"] * scale + 0.15
-        if e - s < 0.35:
-            e = s + 0.35
+        s = w["start"] * scale + 0.12
+        e = w["raw_end"] * scale + 0.12
+        if e - s < 0.32:
+            e = s + 0.32
         words.append({"text": w["text"], "start": s, "end": e})
     return words, audio_dur
 
@@ -185,7 +198,7 @@ def clean():
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V170.1 - 【entity-SHOPEE¦canonical_name=SHOPEE】 LARANJA FIX NOME</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V170.1</a>")
+    return HTMLResponse("<h1>V171 - DEFINITIVO - FIX AUDIO + HEADLINE PRINT 4</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V171</a>")
 
 @app.get("/health")
 def health():
@@ -201,26 +214,26 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         txt = "Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         tmp = folder/"tmp.mp3"
         words, ad = await get_words_real_timing(txt, tmp)
-        dur = min(16.0, max(10.5, ad+0.3))
+        # FIX DEFINITIVO AUDIO: sem mínimo 10.5s, usa audio + 0.15s
+        dur = ad + 0.18
         import shutil
         shutil.copy(tmp, audio)
-        # Recalcula escala final para duração final
-        last_raw = max(w["end"] for w in words)
-        target = max(0.5, ad - 0.25)
-        scale = target / max(0.1, last_raw-0.15)
+        # Re-escala para duracao exata sem sobra
+        last = max(w["end"] for w in words)
+        scale = (ad - 0.12) / max(0.1, last-0.12)
         final_words = []
         for w in words:
-            s = (w["start"]-0.15)*scale + 0.15
-            e = (w["end"]-0.15)*scale + 0.15
+            s = (w["start"]-0.12)*scale + 0.12
+            e = (w["end"]-0.12)*scale + 0.12
             final_words.append({"text": w["text"], "start": s, "end": e})
         
         ass = folder/"cap.ass"
         make_ass_shopee_70pct(ass, final_words, dur)
         hl = folder/"head.png"
-        make_headline_shopee(hl, headline)
+        make_headline_print4_definitiva(hl, headline)
         out = folder/"final.mp4"
         render_definitivo(src, audio, hl, ass, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v170_1.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v171.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
