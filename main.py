@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V167 - DEFINITIVO - VOLTA V157 QUE FUNCIONAVA + HEADLINE PRINT 4"""
+"""Super Robô Klebee — V168 - DEFINITIVO - FIX AMIX INFINITO + FPS 30 - VOLTA V157"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V167-DEFINITIVO"
+VERSION = "KLEBEE-V168-FIX-AMIX-FPS"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -32,7 +32,7 @@ def binary(n: str) -> str:
 def run(args, timeout=400):
     p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
-        raise RuntimeError(f"Erro {p.returncode}: {p.stderr[-3000:]} {p.stdout[-1000:]}")
+        raise RuntimeError(f"Erro {p.returncode}: {p.stderr[-4000:]} {p.stdout[-1000:]}")
     return p
 
 def font(sz: int):
@@ -45,7 +45,6 @@ def font(sz: int):
     return ImageFont.load_default()
 
 def make_headline_print4(path: Path, text: str):
-    # FOTO 4 - TODO MUNDO odeia NARRAR VIDEO - 135PT AGRESSIVO
     img = Image.new("RGBA", (W, 650), (0,0,0,0))
     d = ImageDraw.Draw(img)
     f = font(135)
@@ -81,8 +80,7 @@ def esc(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
 def make_ass_70pct(path: Path, words, duration: float):
-    # 70% ALTURA = MarginV 615 - evita link Shopee
-    header = f"""[Script Info]
+    header = """[Script Info]
 PlayResX: 1080
 PlayResY: 1920
 WrapStyle: 0
@@ -119,8 +117,10 @@ def probe(p: Path) -> float:
     except:
         return 10.0
 
-def render(source, audio, headline, ass_p, out, dur):
-    # FILTRO DO V157 QUE FUNCIONAVA - SIMPLES, SEM FPS, SEM SETPTS, SEM LOOP NO PNG
+def render_definitivo(source, audio, headline, ass_p, out, dur):
+    # FIX DEFINITIVO: FILTRO IGUAL V157 QUE FUNCIONAVA
+    # 1. fps=30 + setpts para corrigir 15360 tbn
+    # 2. amix com narração primeiro [1:a][0:a] duration=first para não ser infinito
     ass_path = str(ass_p.resolve()).replace(":", "\\:").replace("'", "")
     cmd = [
         binary("ffmpeg"),"-y",
@@ -128,10 +128,10 @@ def render(source, audio, headline, ass_p, out, dur):
         "-i",str(audio),
         "-i",str(headline),
         "-filter_complex",
-        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[bg];[bg][2:v]overlay=0:30[hd];[hd]ass='{ass_path}'[v];[0:a]volume=0.18[am];[1:a]volume=1.25[av];[am][av]amix=inputs=2:duration=first[a]",
+        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg];[bg][2:v]overlay=0:30[hd];[hd]ass='{ass_path}'[v];[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]",
         "-map","[v]","-map","[a]",
         "-t",f"{dur:.2f}",
-        "-c:v","libx264","-preset","ultrafast","-crf","23",
+        "-c:v","libx264","-preset","veryfast","-crf","23",
         "-c:a","aac","-b:a","128k",
         str(out)
     ]
@@ -147,7 +147,7 @@ def clean():
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V167 DEFINITIVO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V167</a>")
+    return HTMLResponse("<h1>V168 DEFINITIVO - FIX AMIX</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V168</a>")
 
 @app.get("/health")
 def health():
@@ -161,7 +161,6 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         src = download(video_url, folder)
         audio = folder/"narr.mp3"
         txt = "Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
-        # Audio
         tmp = folder/"tmp.mp3"
         comm = edge_tts.Communicate(txt, VOICE, rate=RATE)
         data = bytearray()
@@ -174,7 +173,6 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         usable = max(0.5, ad-0.35)
         words_txt = txt.split()
         tpw = usable / len(words_txt)
-        # Audio final
         comm2 = edge_tts.Communicate(txt, VOICE, rate=RATE)
         data2 = bytearray()
         async for c in comm2.stream():
@@ -190,8 +188,8 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         hl = folder/"head.png"
         make_headline_print4(hl, headline)
         out = folder/"final.mp4"
-        render(src, audio, hl, ass, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v167.mp4")
+        render_definitivo(src, audio, hl, ass, out, dur)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v168.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
