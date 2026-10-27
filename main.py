@@ -1,4 +1,4 @@
-"""Super Robô Klebee — Motor Definitivo com Legendas ASS / Libass (Estilo Premiere Pro)"""
+"""Super Robô Klebee — Motor Definitivo com Fallback de Timestamps (Estilo Premiere Pro)"""
 from __future__ import annotations
 import json, os, re, shutil, subprocess, uuid
 from pathlib import Path
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-ASS-2026-10-27"
+VERSION = "KLEBEE-PRO-ASS-FALLBACK-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,6 @@ def make_headline(path: Path, text: str):
     for line, h in zip(lines, heights):
         box = draw.textbbox((0, 0), line, font=f, stroke_width=4)
         x = max(20, (W - (box[2] - box[0])) // 2)
-        # Amarelo vibrante com contorno preto pesado (Estilo Premiere Pro)
         draw.text((x, y), line, font=f, fill="#FFE500", stroke_width=6, stroke_fill=(0, 0, 0, 255))
         y += h + 16
     image.save(path)
@@ -83,17 +82,41 @@ def esc_ass(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
 async def make_voice(text: str, path: Path) -> list[dict[str, Any]]:
-    comm = edge_tts.Communicate(text, VOICE, rate=RATE); words = []
+    comm = edge_tts.Communicate(text, VOICE, rate=RATE)
+    audio_bytes = bytearray()
+    words = []
+    
+    async for chunk in comm.stream():
+        if chunk["type"] == "audio":
+            audio_bytes.extend(chunk["data"])
+        elif chunk["type"] == "WordBoundary":
+            start = float(chunk.get("offset", 0)) / 10_000_000
+            dur = float(chunk.get("duration", 0)) / 10_000_000
+            word = str(chunk.get("text", "")).strip()
+            if word:
+                words.append({"text": word, "start": start, "end": start + dur})
+                
+    if not audio_bytes:
+        raise RuntimeError("Edge TTS não gerou áudio.")
+        
     with path.open("wb") as f:
-        async for chunk in comm.stream():
-            if chunk["type"] == "audio": f.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                start = float(chunk.get("offset", 0)) / 10_000_000
-                dur = float(chunk.get("duration", 0)) / 10_000_000
-                word = str(chunk.get("text", "")).strip()
-                if word: words.append({"text": word, "start": start, "end": start + dur})
-    if not path.exists() or path.stat().st_size < 1000: raise RuntimeError("Edge TTS não gerou áudio válido.")
-    if not words: raise RuntimeError("Edge TTS não retornou tempos por palavra.")
+        f.write(audio_bytes)
+        
+    # FALLBACK INTELIGENTE: Se a API online não retornar os timestamps por palavra, 
+    # nós calculamos a distribuição proporcional com base na duração do áudio.
+    if not words:
+        clean_words = text.split()
+        if clean_words:
+            # Estima duração do áudio baseada no tamanho do arquivo mp3 (aproximadamente)
+            audio_duration = max(3.0, len(audio_bytes) / 16000.0) 
+            step = audio_duration / len(clean_words)
+            for i, w in enumerate(clean_words):
+                start = i * step
+                end = start + step
+                words.append({"text": w, "start": start, "end": end})
+                
+    if not words:
+        raise RuntimeError("Falha ao processar palavras da narração.")
     return words
 
 def make_ass(path: Path, words: list[dict[str, Any]], duration: float):
@@ -124,7 +147,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             parts = []
             for i, word in enumerate(group):
                 token = esc_ass(word["text"])
-                # Amarelo vibrante (&H0000E5FF&) para a palavra ativa, Branco (&H00FFFFFF&) para as demais
                 parts.append(r"{\c&H0000E5FF&}" + token + r"{\c&H00FFFFFF&}" if i == active_i else token)
             events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{' '.join(parts)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
