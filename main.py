@@ -58,7 +58,6 @@ def wrap(draw, text, f, max_width):
     return lines[:3]
 
 def make_headline(path: Path, text: str):
-    # V145: Headline muito maior e mais agressiva
     image = Image.new("RGBA", (W, 550), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     size = 130
@@ -75,7 +74,6 @@ def make_headline(path: Path, text: str):
     for line, h in zip(lines, heights):
         box = draw.textbbox((0, 0), line, font=f, stroke_width=12)
         x = max(10, (W - (box[2] - box[0])) // 2)
-        # Amarelo Klebee com contorno preto GROSSO
         draw.text((x, y), line, font=f, fill="#FFE500", stroke_width=14, stroke_fill=(0, 0, 0, 255))
         y += h + 20
     image.save(path)
@@ -120,7 +118,6 @@ async def make_voice(text: str, path: Path) -> list[dict[str, Any]]:
     return words
 
 def make_ass(path: Path, words: list[dict[str, Any]], duration: float):
-    # V145: Estilo TikTok/Hormozi - GIGANTE e CENTRALIZADO
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -151,7 +148,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             parts = []
             for i, word in enumerate(group):
                 token = esc_ass(word["text"])
-                # Palavra ativa AMARELA, resto BRANCA
                 if i == active_i:
                     parts.append(r"{\c&H00E5FF& \b1}" + token + r"{\c&HFFFFFF& \b0}")
                 else:
@@ -185,4 +181,80 @@ def probe_duration(path: Path) -> float:
         raise RuntimeError("ffprobe não leu a duração.") from e
 
 def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, duration: float):
-    ass_path = str(ass.resolve()).replace("\\", "/").replace(":", r"\:").replace("'",
+    ass_path = str(ass.resolve()).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+    headline_path = str(headline.resolve()).replace("\\", "/")
+    cmd = [
+        binary("ffmpeg"), "-y",
+        "-i", str(source),
+        "-i", str(audio),
+        "-i", headline_path,
+        "-filter_complex", (
+            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS}[bg]; "
+            f"[bg][2:v]overlay=0:0[with_headline]; "
+            f"[with_headline]ass='{ass_path}'[v]; "
+            f"[0:a]volume=0.18[a_music]; "
+            f"[1:a]volume=1.1[a_voice]; "
+            f"[a_music][a_voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a_final]"
+        ),
+        "-map", "[v]", "-map", "[a_final]",
+        "-t", f"{duration:.3f}",
+        "-threads", "4",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "21",
+        "-c:a", "aac", "-b:a", "192k", "-shortest",
+        str(output)
+    ]
+    run(cmd, timeout=400)
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return f"""
+    <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Super Robô Klebee - Pro Engine {VERSION}</title>
+    <style>
+    body{{background:#0f172a;color:#f8fafc;font-family:Arial,sans-serif;text-align:center;padding:60px 15px}}
+    .card{{background:#1e293b;padding:40px;border-radius:16px;display:inline-block;max-width:650px;box-shadow:0 10px 25px rgba(0,0,0,0.5)}}
+    h1{{color:#38bdf8}}p{{color:#94a3b8}}.btn{{background:#22c55e;color:white;padding:18px 36px;text-decoration:none;border-radius:10px;font-weight:bold;display:inline-block;margin-top:20px}}
+    </style></head><body><div class="card">
+    <h1>🚀 Super Robô Klebee V145 PRO FIX</h1>
+    <p>Headline Gigante + Legenda Hormozi + Música Mixada</p>
+    <a class="btn" href="/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA">🟢 GERAR VÍDEO PROFISSIONAL V145</a>
+    </div></body></html>
+    """
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": VERSION, "ffmpeg": shutil.which("ffmpeg") or "missing"}
+
+@app.get("/render-web")
+async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRÍVEL!")):
+    job = uuid.uuid4().hex
+    folder = JOBS / job
+    folder.mkdir(parents=True, exist_ok=False)
+    try:
+        print(f"[{job}] Iniciando download de: {video_url}")
+        source = download(video_url, folder)
+        print(f"[{job}] Download concluído. Gerando áudio TTS...")
+        audio = folder / "narration.mp3"
+        narration_text = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
+        words = await make_voice(narration_text, audio)
+        audio_duration = probe_duration(audio)
+        duration = min(16.0, max(10.0, audio_duration + 0.15))
+        print(f"[{job}] Áudio gerado. Duração: {duration}s. Criando legendas e headline...")
+        ass = folder / "captions.ass"
+        make_ass(ass, words, duration)
+        headline_img = folder / "headline.png"
+        make_headline(headline_img, headline)
+        output = folder / "klebee_video.mp4"
+        print(f"[{job}] Iniciando renderização FFmpeg V145...")
+        render(source, audio, ass, headline_img, output, duration)
+        print(f"[{job}] Renderização V145 concluída!")
+        return FileResponse(output, media_type="video/mp4", filename="super_robo_klebee_v145.mp4")
+    except Exception as e:
+        err_msg = traceback.format_exc()
+        print(f"ERRO CRITICO NO JOB {job}:\n{err_msg}")
+        raise HTTPException(status_code=500, detail=f"Erro na renderização: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
