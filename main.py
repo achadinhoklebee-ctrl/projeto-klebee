@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V160 - FIX ESTOURO E REPETICAO - TIKTOK VIRAL 3 PALAVRAS"""
+"""Super Robô Klebee — V161 - PREMIERE REAL - 1 PALAVRA GIGANTE - 70% ALTURA - HEADLINE HORMOZI"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V160-TIKTOK-3-PALAVRAS"
+VERSION = "KLEBEE-V161-PREMIERE-1-WORD-70PCT"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -16,7 +16,12 @@ JOBS.mkdir(parents=True, exist_ok=True)
 W, H, FPS = 1080, 1920, 30
 VOICE = os.getenv("KLEBEE_TTS_VOICE", "pt-BR-AntonioNeural")
 RATE = os.getenv("KLEBEE_TTS_RATE", "+0%")
-FONT_PATHS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
+FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+]
 
 app = FastAPI(title="Super Robô Klebee", version=VERSION)
 
@@ -30,18 +35,18 @@ def run(args: list[str], timeout: int = 400) -> subprocess.CompletedProcess:
     if p.returncode: raise RuntimeError(f"Falhou ({p.returncode}): {(p.stderr or p.stdout)[-2500:]}")
     return p
 
-def font(size: int):
+def font(size: int, bold=True):
     for pth in FONT_PATHS:
         if Path(pth).is_file():
             try: return ImageFont.truetype(pth, size=size)
             except: pass
     return ImageFont.load_default()
 
-def wrap(draw, text, f, max_width):
+def wrap(draw, text, f, max_width, stroke=16):
     lines, cur = [], ""
     for w in text.split():
         cand = f"{cur} {w}".strip()
-        if draw.textbbox((0,0), cand, font=f, stroke_width=13)[2] <= max_width:
+        if draw.textbbox((0,0), cand, font=f, stroke_width=stroke)[2] <= max_width:
             cur = cand
         else:
             if cur: lines.append(cur)
@@ -49,55 +54,47 @@ def wrap(draw, text, f, max_width):
     if cur: lines.append(cur)
     return lines[:3]
 
-def make_headline(path: Path, text: str):
-    image = Image.new("RGBA", (W, 500), (0,0,0,0))
+def make_headline_hormozi(path: Path, text: str):
+    # ESTILO FOTO 4: TODO MUNDO odeia NARRAR VIDEO - extra bold, agressivo
+    image = Image.new("RGBA", (W, 550), (0,0,0,0))
     draw = ImageDraw.Draw(image)
-    size = 112
-    while size >= 60:
+    size = 125
+    while size >= 70:
         f = font(size)
-        if wrap(draw, text.upper(), f, W-120): break
+        if wrap(draw, text.upper(), f, W-100, 16): break
         size -= 2
-    f = font(max(size, 60))
-    lines = wrap(draw, text.upper(), f, W-120) or [text.upper()]
-    y = 15
+    f = font(max(size, 70))
+    lines = wrap(draw, text.upper(), f, W-100, 16) or [text.upper()]
+    y = 20
     for line in lines:
-        box = draw.textbbox((0,0), line, font=f, stroke_width=13)
+        box = draw.textbbox((0,0), line, font=f, stroke_width=16)
         x = (W - (box[2]-box[0])) // 2
-        draw.text((x,y), line, font=f, fill="#FFE500", stroke_width=13, stroke_fill=(0,0,0,255))
-        y += box[3]-box[1]+16
+        # Contorno preto ultra grosso + preenchimento amarelo - estilo Hormozi
+        draw.text((x,y), line, font=f, fill="#FFE500", stroke_width=16, stroke_fill=(0,0,0,255))
+        y += box[3]-box[1]+18
     image.save(path)
 
-def make_caption_png_tiktok(path: Path, window_words: list[str], active_pos_in_window: int):
-    """Gera 1 PNG com 3 palavras max, só 1 amarela - SEM ESTOURO"""
-    img = Image.new("RGBA", (W, 350), (0,0,0,0))
+def make_caption_one_word(path: Path, word: str):
+    """ESTILO FOTO 5: CAPTIONS - 1 palavra gigante amarela, centralizada"""
+    img = Image.new("RGBA", (W, 300), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-    f = font(82)
     
-    # Mede largura real de cada palavra com stroke para não estourar
-    widths = []
-    for w in window_words:
-        bbox = draw.textbbox((0,0), w+" ", font=f, stroke_width=10)
-        widths.append(bbox[2]-bbox[0])
+    # Tenta fonte grande, se não couber reduz
+    size = 95
+    f = font(size)
+    bbox = draw.textbbox((0,0), word, font=f, stroke_width=11)
+    w_width = bbox[2]-bbox[0]
     
-    total_w = sum(widths)
-    # Se estourar 1080, reduz fonte automaticamente
-    if total_w > W-120:
-        f = font(68)
-        widths=[]
-        for w in window_words:
-            bbox = draw.textbbox((0,0), w+" ", font=f, stroke_width=10)
-            widths.append(bbox[2]-bbox[0])
-        total_w = sum(widths)
+    while w_width > W-100 and size > 50:
+        size -= 4
+        f = font(size)
+        bbox = draw.textbbox((0,0), word, font=f, stroke_width=11)
+        w_width = bbox[2]-bbox[0]
     
-    x = (W - total_w)//2
-    y = 80
-    
-    for i, w in enumerate(window_words):
-        is_active = (i == active_pos_in_window)
-        color = "#FFE500" if is_active else "#FFFFFF"
-        draw.text((x, y), w, font=f, fill=color, stroke_width=10, stroke_fill=(0,0,0,255))
-        x += widths[i]
-    
+    x = (W - w_width)//2
+    y = 30
+    # CAPTIONS style: amarelo com contorno preto grosso
+    draw.text((x, y), word, font=f, fill="#FFE500", stroke_width=11, stroke_fill=(0,0,0,255))
     img.save(path)
 
 async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: float):
@@ -129,7 +126,10 @@ def probe_duration(path: Path) -> float:
     try: return float(p.stdout.strip())
     except: return 10.0
 
-def render_png_sequence(source, audio, headline, caption_pngs, words, output, duration):
+def render_one_word_premiere(source, audio, headline, caption_pngs, words, output, duration):
+    # ALTURA 70% = 1300px do topo, evita link Shopee
+    CAPTION_Y = int(H * 0.68)  # 1305
+    
     filters = []
     filters.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg]")
     last = "[bg]"
@@ -141,7 +141,7 @@ def render_png_sequence(source, audio, headline, caption_pngs, words, output, du
         s = w["start"]
         e = min(duration, w["end"])
         input_label = f"[{3+i}:v]"
-        filters.append(f"{last}{input_label}overlay=(W-w)/2:H-360:enable='between(t,{s:.3f},{e:.3f})'[tmp{next_idx}]")
+        filters.append(f"{last}{input_label}overlay=0:{CAPTION_Y}:enable='between(t,{s:.3f},{e:.3f})'[tmp{next_idx}]")
         last = f"[tmp{next_idx}]"; next_idx+=1
 
     filters.append(f"[0:a]volume=0.18[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]")
@@ -153,7 +153,7 @@ def render_png_sequence(source, audio, headline, caption_pngs, words, output, du
     run(cmd,600)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<h1>KLEBEE V160 - FIX ESTOURO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V160</a>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V161 - 1 WORD PREMIERE 70%</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V161</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -175,32 +175,15 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         duration=min(16.0, max(10.5, audio_dur + 0.5))
         words=await make_voice_and_words_real_time(txt,audio,duration)
 
-        # JANELA DE 3 PALAVRAS COM SENTIDO - PADRÃO TIKTOK
-        all_texts = [w["text"] for w in words]
         caption_pngs=[]
-        for i in range(len(all_texts)):
-            # Pega janela de 3: anterior, atual, próxima
-            start = max(0, i-1)
-            end = min(len(all_texts), i+2)
-            window = all_texts[start:end]
-            active_pos = i - start
-            
-            # Ajusta para sempre ter 3 palavras quando possível para não pular
-            if len(window) < 3 and len(all_texts) >= 3:
-                if start == 0:
-                    window = all_texts[0:3]
-                    active_pos = i
-                elif end == len(all_texts):
-                    window = all_texts[-3:]
-                    active_pos = i - (len(all_texts)-3)
-            
+        for i, w in enumerate(words):
             p = caps_dir / f"cap_{i:03d}.png"
-            make_caption_png_tiktok(p, window, active_pos)
+            make_caption_one_word(p, w["text"])
             caption_pngs.append(p)
 
-        hl=folder/"headline.png"; make_headline(hl,headline)
-        out=folder/"klebee.mp4"; render_png_sequence(source,audio,hl,caption_pngs,words,out,duration)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v160.mp4")
+        hl=folder/"headline.png"; make_headline_hormozi(hl,headline)
+        out=folder/"klebee.mp4"; render_one_word_premiere(source,audio,hl,caption_pngs,words,out,duration)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v161.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
