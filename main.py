@@ -1,6 +1,7 @@
 import os
 import hashlib
 import asyncio
+import subprocess
 import numpy as np
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, FileResponse
@@ -24,32 +25,22 @@ CACHE_AUDIO_DIR = os.path.join(BASE_DIR, "cache_audio")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CACHE_AUDIO_DIR, exist_ok=True)
 
-@app.get("/", response_class=HTMLResponse)
-def home():
-    return """
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head>
-        <meta charset="UTF-8">
-        <title>Super Robô Klebee - Cloud Engine V144</title>
-        <style>
-            body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
-            .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-            h1 { color: #38bdf8; font-size: 32px; margin-bottom: 10px; }
-            p { color: #94a3b8; font-size: 18px; margin-bottom: 30px; }
-            .btn { background: #22c55e; color: white; padding: 18px 36px; font-size: 20px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block; transition: 0.3s; }
-            .btn:hover { background: #16a34a; transform: scale(1.03); }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>🚀 Super Robô Klebee V144</h1>
-            <p>Gerador Autônomo de Vídeos Curtos na Nuvem (Com Audio Ducking & Legendas Nítidas)</p>
-            <a class="btn" href="/render?produto=organizador%20gaveta%20bambu%20expansivel">🟢 GERAR VÍDEO PERFEITO</a>
-        </div>
-    </body>
-    </html>
-    """
+def baixar_video_tiktok(url_tiktok):
+    hash_url = hashlib.md5(url_tiktok.encode()).hexdigest()
+    output_path = os.path.join(CACHE_AUDIO_DIR, f"base_{hash_url}.mp4")
+    
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
+        return output_path
+
+    # Baixa o vídeo via yt-dlp sem marca d'água na nuvem
+    cmd = [
+        "yt-dlp",
+        "-f", "b",
+        "-o", output_path,
+        url_tiktok
+    ]
+    subprocess.run(cmd, check=True)
+    return output_path
 
 async def gerar_audio_narracao(texto):
     hash_txt = hashlib.md5(texto.encode()).hexdigest()
@@ -99,13 +90,39 @@ def criar_overlay_texto_flutuante(texto, largura=1080, altura=250, cor_texto="ye
     img.save(path_img)
     return path_img
 
-@app.get("/render")
-def render(produto: str = "organizador gaveta bambu expansivel"):
-    video_path = os.path.join(BASE_DIR, "base.mp4")
-    if not os.path.exists(video_path):
-        return {"status": "ERRO", "detalhe": "Certifique-se de incluir o arquivo base.mp4 no repositório do GitHub."}
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Super Robô Klebee - Cloud Engine V144</title>
+        <style>
+            body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
+            .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h1 { color: #38bdf8; font-size: 32px; margin-bottom: 10px; }
+            p { color: #94a3b8; font-size: 18px; margin-bottom: 30px; }
+            .btn { background: #22c55e; color: white; padding: 18px 36px; font-size: 20px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block; transition: 0.3s; }
+            .btn:hover { background: #16a34a; transform: scale(1.03); }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🚀 Super Robô Klebee V144</h1>
+            <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
+            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
+        </div>
+    </body>
+    </html>
+    """
 
+@app.get("/render")
+def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461")):
     try:
+        # Baixar vídeo bruto direto do TikTok na nuvem
+        video_path = baixar_video_tiktok(video_url)
+        
         base_clip = VideoFileClip(video_path)
         duracao_alvo = 15.0
         
@@ -122,7 +139,7 @@ def render(produto: str = "organizador gaveta bambu expansivel"):
         elif video_base.h < 1920:
             video_base = video_base.resize((1080, 1920))
 
-        script_texto = "Gaveta bagunçada? Nunca mais! Conheça o organizador em bambu que expande e ajusta perfeitamente na sua casa. Garanta o seu no link!"
+        script_texto = "Olha esse achadinho incrível pra sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
         narração_audio = AudioFileClip(audio_voz_path)
 
@@ -132,10 +149,10 @@ def render(produto: str = "organizador gaveta bambu expansivel"):
         else:
             audio_final = narração_audio.fx(volumex, 1.2)
 
-        t1 = ImageClip(criar_overlay_texto_flutuante("🚨 GAVETA BAGUNÇADA?", cor_texto="#FACC15", tamanho_fonte=65)).set_start(0.0).set_duration(2.8).set_pos(('center', 300))
-        t2 = ImageClip(criar_overlay_texto_flutuante("🔥 NUNCA MAIS!", cor_texto="#FFFFFF", tamanho_fonte=70)).set_start(2.8).set_duration(2.2).set_pos(('center', 300))
-        t3 = ImageClip(criar_overlay_texto_flutuante("📏 EXPANDE E AJUSTA TUDO!", cor_texto="#FACC15", tamanho_fonte=60)).set_start(5.0).set_duration(4.0).set_pos(('center', 1450))
-        t4 = ImageClip(criar_overlay_texto_flutuante("⚡ ORGANIZAÇÃO EM SEGUNDOS", cor_texto="#FFFFFF", tamanho_fonte=58)).set_start(9.0).set_duration(3.0).set_pos(('center', 1450))
+        t1 = ImageClip(criar_overlay_texto_flutuante("🚨 ACHADINHO INCRÍVEL!", cor_texto="#FACC15", tamanho_fonte=65)).set_start(0.0).set_duration(2.8).set_pos(('center', 300))
+        t2 = ImageClip(criar_overlay_texto_flutuante("🔥 PRÁTICO E MODERNO!", cor_texto="#FFFFFF", tamanho_fonte=70)).set_start(2.8).set_duration(2.2).set_pos(('center', 300))
+        t3 = ImageClip(criar_overlay_texto_flutuante("📏 FACILITA SUA ROTINA!", cor_texto="#FACC15", tamanho_fonte=60)).set_start(5.0).set_duration(4.0).set_pos(('center', 1450))
+        t4 = ImageClip(criar_overlay_texto_flutuante("⚡ OFERTA POR TEMPO LIMITADO", cor_texto="#FFFFFF", tamanho_fonte=58)).set_start(9.0).set_duration(3.0).set_pos(('center', 1450))
         t5 = ImageClip(criar_overlay_texto_flutuante("👇 CLIQUE NO LINK E GARANTA O SEU!", cor_texto="#22C55E", tamanho_fonte=55)).set_start(12.0).set_duration(3.0).set_pos(('center', 1600))
 
         video_final = CompositeVideoClip([video_base, t1, t2, t3, t4, t5], size=(1080, 1920))
@@ -161,4 +178,5 @@ def render(produto: str = "organizador gaveta bambu expansivel"):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
