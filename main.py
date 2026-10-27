@@ -1,4 +1,4 @@
-"""Super Robô Klebee — Motor Definitivo com Correção de Bitrate AAC (Estilo Premiere Pro)"""
+"""Super Robô Klebee — Motor Pro com Resposta Direta e Otimizada"""
 from __future__ import annotations
 import json, os, re, shutil, subprocess, uuid
 from pathlib import Path
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-ASS-AAC-FIX-2026-10-27"
+VERSION = "KLEBEE-PRO-ASS-FAST-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -19,12 +19,6 @@ VOICE = os.getenv("KLEBEE_TTS_VOICE", "pt-BR-AntonioNeural")
 RATE = os.getenv("KLEBEE_TTS_RATE", "+15%")
 FONT_PATHS = [os.getenv("KLEBEE_FONT", ""), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
 app = FastAPI(title="Super Robô Klebee — Pro Engine", version=VERSION)
-
-class RenderRequest(BaseModel):
-    url: str = Field(min_length=8, max_length=2048)
-    narration: str = Field(min_length=3, max_length=1200)
-    headline: str = Field(min_length=2, max_length=100)
-    duration_seconds: float = Field(default=15.0, ge=5.0, le=16.0)
 
 def binary(name: str) -> str:
     path = shutil.which(name)
@@ -166,7 +160,7 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
              f"subtitles='{ass_path}'[subbed];[2:v]format=rgba[head];[subbed][head]overlay=0:120:shortest=1[vout]")
     run([binary("ffmpeg"), "-y", "-stream_loop", "-1", "-i", str(source), "-i", str(audio), "-loop", "1", "-i", str(headline),
          "-filter_complex", graph, "-map", "[vout]", "-map", "1:a:0", "-t", f"{duration:.3f}", "-r", str(FPS),
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)], 600)
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)], 600)
     if not output.is_file() or output.stat().st_size < 100_000: raise RuntimeError("FFmpeg não produziu MP4 válido.")
 
 @app.get("/", response_class=HTMLResponse)
