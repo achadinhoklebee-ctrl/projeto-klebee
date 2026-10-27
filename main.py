@@ -1,4 +1,4 @@
-"""Super Robô Klebee — Motor Pro Otimizado para Cloud com Correção de Sintaxe"""
+"""Super Robô Klebee — Motor Pro Otimizado para Cloud (Completo)"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-FIXED-2026-10-27"
+VERSION = "KLEBEE-PRO-FULL-FIX-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -184,7 +184,7 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
     
     cmd = [
         binary("ffmpeg"), "-y",
-        "-stream_loop", "-1", "-i", str(source),
+        "-i", str(source),
         "-i", str(audio),
         "-i", headline_path,
         "-filter_complex", (
@@ -194,7 +194,8 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
         ),
         "-map", "[v]", "-map", "1:a",
         "-t", f"{duration:.3f}",
-        "-c:v", "libx264", "-preset", "faster", "-crf", "22",
+        "-threads", "4",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", "-shortest",
         str(output)
     ]
