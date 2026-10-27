@@ -16,9 +16,9 @@ from moviepy.editor import (
     CompositeAudioClip,
     concatenate_videoclips
 )
-from moviepy.audio.fx.all import audio_fadein, audio_fadeout, volumex
+from moviepy.audio.fx.all import volumex
 
-app = FastAPI(title="Klebee Cloud Engine - V144 Pro")
+app = FastAPI(title="Klebee Cloud Engine - V144 Pro Viral")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -53,79 +53,101 @@ async def gerar_audio_narracao(texto):
     await communicate.save(path_audio)
     return path_audio
 
-def criar_overlay_texto_flutuante(texto, largura=1080, altura=350, cor_texto="yellow", tamanho_fonte=52):
-    # Quebra automática de linhas para nunca estourar a largura do vídeo 9:16
-    linhas = textwrap.wrap(texto, width=24)
-    
-    img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    
+def carregar_fonte(tamanho):
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
         "arial.ttf",
         "arialbd.ttf"
     ]
-    font = None
     for fp in font_paths:
         if os.path.exists(fp):
             try:
-                font = ImageFont.truetype(fp, tamanho_fonte)
-                break
+                return ImageFont.truetype(fp, tamanho)
             except:
                 pass
-    if not font:
-        font = ImageFont.load_default()
+    return ImageFont.load_default()
 
-    pad_x = 30
-    pad_y = 20
+def criar_overlay_headline(texto, largura=1080, altura=200):
+    """Gera uma headline profissional superior sem caixa preta pesada, usando contorno forte."""
+    img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = carregar_fonte(58)
     
-    # Calcular dimensões do bloco de texto
-    line_widths = []
-    line_heights = []
+    linhas = textwrap.wrap(texto, width=22)
+    centro_x = largura // 2
+    
+    current_y = 15
     for linha in linhas:
         bbox = font.getbbox(linha)
         w = bbox[2] - bbox[0]
         h = bbox[3] - bbox[1]
-        line_widths.append(w)
-        line_heights.append(h)
+        line_x = centro_x - (w // 2)
+        
+        # Contorno / Sombra preta grossa para destaque em qualquer fundo
+        offset = 4
+        for dx in range(-offset, offset + 1):
+            for dy in range(-offset, offset + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
+        
+        # Texto principal em Amarelo Viral
+        draw.text((line_x, current_y), linha, font=font, fill="#FACC15")
+        current_y += h + 8
+        
+    path_img = os.path.join(CACHE_AUDIO_DIR, f"headline_{abs(hash(texto))}.png")
+    img.save(path_img)
+    return path_img
+
+def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#FFFFFF"):
+    """Gera legenda dinâmica inferior com pill translúcida compacta e quebra automática real."""
+    linhas = textwrap.wrap(texto, width=26)
+    img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = carregar_fonte(52)
+    
+    pad_x = 35
+    pad_y = 18
+    
+    line_widths = []
+    line_heights = []
+    for linha in linhas:
+        bbox = font.getbbox(linha)
+        line_widths.append(bbox[2] - bbox[0])
+        line_heights.append(bbox[3] - bbox[1])
     
     max_w = max(line_widths) if line_widths else 100
-    total_h = sum(line_heights) + (len(linhas) - 1) * 12
+    total_h = sum(line_heights) + (len(linhas) - 1) * 10
     
     box_w = max_w + (pad_x * 2)
     box_h = total_h + (pad_y * 2)
-    
     box_x = (largura - box_w) // 2
     box_y = (altura - box_h) // 2
     
-    # Desenhar fundo estilo "pill" escuro semi-transparente para destaque profissional
+    # Pill translúcida elegante para legibilidade absoluta
     draw.rounded_rectangle(
         [box_x, box_y, box_x + box_w, box_y + box_h],
-        radius=18,
-        fill=(0, 0, 0, 190)
+        radius=16,
+        fill=(0, 0, 0, 210)
     )
     
-    # Renderizar linhas centralizadas com contorno preto forte
     current_y = box_y + pad_y
     for i, linha in enumerate(linhas):
         w = line_widths[i]
         h = line_heights[i]
         line_x = box_x + (box_w - w) // 2
         
-        # Sombra de contorno
+        # Contorno preto
         offset = 3
         for dx in range(-offset, offset + 1):
             for dy in range(-offset, offset + 1):
                 if dx != 0 or dy != 0:
                     draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
         
-        # Texto principal coloridinho
         draw.text((line_x, current_y), linha, font=font, fill=cor_texto)
-        current_y += h + 12
+        current_y += h + 10
         
-    filename = f"temp_txt_{abs(hash(texto))}.png"
-    path_img = os.path.join(CACHE_AUDIO_DIR, filename)
+    path_img = os.path.join(CACHE_AUDIO_DIR, f"leg_{abs(hash(texto))}.png")
     img.save(path_img)
     return path_img
 
@@ -136,7 +158,7 @@ def home():
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
-        <title>Super Robô Klebee - Cloud Engine V144</title>
+        <title>Super Robô Klebee - Cloud Engine V144 Pro</title>
         <style>
             body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
             .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
@@ -148,9 +170,9 @@ def home():
     </head>
     <body>
         <div class="card">
-            <h1>🚀 Super Robô Klebee V144</h1>
-            <p>Gerador Autônomo de Vídeos Curtos na Nuvem (Pro)</p>
-            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
+            <h1>🚀 Super Robô Klebee V144 Pro</h1>
+            <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
+            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO PROFISSIONAL</a>
         </div>
     </body>
     </html>
@@ -160,9 +182,14 @@ def home():
 def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461")):
     try:
         video_path = baixar_video_tiktok(video_url)
-        
         base_clip = VideoFileClip(video_path)
-        duracao_alvo = 15.0
+        
+        # Gerar áudio e calcular duração exata da locução
+        script_texto = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
+        audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
+        narracao_audio = AudioFileClip(audio_voz_path)
+        
+        duracao_alvo = float(narracao_audio.duration) + 0.5  # Sincronia perfeita com o áudio gerado
         
         if base_clip.duration < duracao_alvo:
             repeats = int(duracao_alvo / base_clip.duration) + 1
@@ -177,24 +204,37 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         elif video_base.h < 1920:
             video_base = video_base.resize((1080, 1920))
 
-        script_texto = "Olha esse achadinho incrível pra sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
-        audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
-        narração_audio = AudioFileClip(audio_voz_path)
-
         if base_clip.audio is not None:
             trilha_fundo = base_clip.audio.subclip(0, duracao_alvo).fx(volumex, 0.12)
-            audio_final = CompositeAudioClip([narração_audio.fx(volumex, 1.2), trilha_fundo])
+            audio_final = CompositeAudioClip([narracao_audio.fx(volumex, 1.2), trilha_fundo])
         else:
-            audio_final = narração_audio.fx(volumex, 1.2)
+            audio_final = narracao_audio.fx(volumex, 1.2)
 
-        # Legendas estruturadas, centralizadas e com quebra de linha automática (posicionadas na zona nobre do feed)
-        t1 = ImageClip(criar_overlay_texto_flutuante("🚨 ACHADINHO INCRÍVEL PARA SUA CASA!", cor_texto="#FACC15", tamanho_fonte=54)).set_start(0.0).set_duration(3.0).set_pos(('center', 1100))
-        t2 = ImageClip(criar_overlay_texto_flutuante("🔥 PRÁTICO, MODERNO E ESSENCIAL", cor_texto="#FFFFFF", tamanho_fonte=54)).set_start(3.0).set_duration(3.0).set_pos(('center', 1100))
-        t3 = ImageClip(criar_overlay_texto_flutuante("📏 VAI FACILITAR DEMAIS A SUA ROTINA!", cor_texto="#FACC15", tamanho_fonte=52)).set_start(6.0).set_duration(3.5).set_pos(('center', 1100))
-        t4 = ImageClip(criar_overlay_texto_flutuante("⚡ CORRE ANTES QUE ESGOTE NO ESTOQUE", cor_texto="#FFFFFF", tamanho_fonte=52)).set_start(9.5).set_duration(2.8).set_pos(('center', 1100))
-        t5 = ImageClip(criar_overlay_texto_flutuante("👇 CLIQUE NO LINK DA BIO E GARANTA O SEU!", cor_texto="#22C55E", tamanho_fonte=52)).set_start(12.3).set_duration(2.7).set_pos(('center', 1100))
+        # 1. Headline fixa no topo (zona segura acima da barra de pesquisa)
+        path_head = criar_overlay_headline("🚨 ACHADINHO INCRÍVEL!")
+        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 180))
 
-        video_final = CompositeVideoClip([video_base, t1, t2, t3, t4, t5], size=(1080, 1920))
+        # 2. Legendas dinâmicas fracionadas e sincronizadas com os tempos reais da fala
+        partes_legenda = [
+            ("Olha esse achadinho incrível para sua casa!", 0.0, 3.2, "#FFFFFF"),
+            ("Prático, moderno e vai facilitar", 3.2, 6.5, "#FACC15"),
+            ("demais a sua rotina!", 6.5, 8.8, "#FFFFFF"),
+            ("Corre no link da bio e garanta o seu", 8.8, 12.0, "#FACC15"),
+            ("antes que esgote!", 12.0, duracao_alvo, "#22C55E")
+        ]
+
+        clips_legendas = [headline_clip]
+        for texto_bloco, inicio, fim, cor in partes_legenda:
+            if inicio >= duracao_alvo:
+                continue
+            dur = min(fim, duracao_alvo) - inicio
+            if dur <= 0:
+                continue
+            path_leg = criar_overlay_legenda_dinamica(texto_bloco, cor_texto=cor)
+            leg_clip = ImageClip(path_leg).set_start(inicio).set_duration(dur).set_pos(('center', 1350))
+            clips_legendas.append(leg_clip)
+
+        video_final = CompositeVideoClip([video_base] + clips_legendas, size=(1080, 1920))
         video_final = video_final.set_duration(duracao_alvo).set_audio(audio_final)
 
         output_name = f"klebee_v144_cloud_{int(os.urandom(3).hex(), 16)}.mp4"
