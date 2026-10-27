@@ -15,7 +15,8 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import volumex, audio_fadein, audio_fadeout
 
-app = FastAPI(title="Klebee Cloud Engine - Dynamic Captions")
+APP_VERSION = "KLEBEE-DYNAMIC-WORDS-2026-10-26-01"
+app = FastAPI(title="Klebee Cloud Engine - Dynamic Captions", version=APP_VERSION)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -279,7 +280,17 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
+
+
+@app.get("/version")
+def version():
+    return {
+        "app_version": APP_VERSION,
+        "caption_mode": "word-boundary-highlight",
+        "headline_y": HEADLINE_Y,
+        "caption_y": CAPTION_Y,
+    }
 
 
 @app.get("/render")
@@ -340,7 +351,7 @@ def render(video_url: str = Query(
                                          size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
         clips_to_close.append(video_final)
 
-        output_name = f"klebee_dynamic_{os.urandom(4).hex()}.mp4"
+        output_name = f"klebee_dynamic_v1_{os.urandom(4).hex()}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_name)
         video_final.write_videofile(
             output_path, fps=24, codec="libx264", audio_codec="aac",
