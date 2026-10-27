@@ -2,7 +2,7 @@ fastapi
 uvicorn
 edge-tts
 Pillow
-moviepy
+moviepy==1.0.3
 numpy
 yt-dlp
 requests
