@@ -1,7 +1,7 @@
 """
-VIDEO-AUTORAL V177e - FINAL ESTAVEL + REGRA COMPARTIMENTOS
-Base: V177b que gerou seu video COMPARTIMENTOS e funcionou
-Fix: COMPARTIMENTOS nao estoura largura - MAX_W 980px
+V177f - FIX CENTRALIZACAO COMPARTIMENTOS - DEFINITIVO
+Problema: total tava ws+6, mas real é ws+16 (caixinha). Centralização errada.
+Fix: total = sum(ws+16) + re-centraliza via bbox crop
 """
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, random
@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V177e-ESTAVEL-COMPARTIMENTOS"
+VERSION = "V177f-CENTRALIZADO"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -27,7 +27,7 @@ PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="V177e", version=VERSION)
+app = FastAPI(title="V177f", version=VERSION)
 
 def binary(n: str):
     import shutil
@@ -52,16 +52,16 @@ def font(sz):
     return ImageFont.load_default()
 
 def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=1080):
-    """REGRA: palavras grandes tipo COMPARTIMENTOS tem que caber em 980px"""
     MAX_W = canvas_w - 100
     cur_fsize = fsize
+    final_ws = []
+    final_total = 0
     for _ in range(8):
         f = font(cur_fsize)
         dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
-        letters = list(word.upper())
         ws = []
         total = 0
-        for lt in letters:
+        for lt in word.upper():
             if lt.strip() == "":
                 ws.append(40)
                 total += 40
@@ -72,22 +72,24 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
                 except:
                     w = cur_fsize*0.6
                 ws.append(w)
-                total += w + 6
+                total += w + 16
         if total <= MAX_W or cur_fsize <= 38:
+            final_ws = ws
+            final_total = total
             break
         scale = MAX_W / total
         cur_fsize = max(38, int(cur_fsize * scale * 0.92))
     
     f = font(cur_fsize)
-    img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
-    x = (canvas_w - total)//2
+    tmp_img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
+    x = (canvas_w - final_total)//2
     y_center = canvas_h//2
-    for i, lt in enumerate(list(word.upper())):
+    for i, lt in enumerate(word.upper()):
         if lt.strip() == "":
             x += 40
             continue
         bg, txt = random.choice(PALETTE)
-        lw = int(ws[i] + 22)
+        lw = int(final_ws[i] + 22)
         lh = int(cur_fsize * 1.2) + 12
         li = Image.new("RGBA", (lw, lh), (0,0,0,0))
         ImageDraw.Draw(li).rectangle([0,0,lw,lh], fill=bg)
@@ -101,12 +103,22 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         tx = (lw - tw)//2
         ty = (lh - th)//2 - 2
         ImageDraw.Draw(li).text((tx, ty), lt, font=f, fill=txt)
-        rot = li.rotate(random.uniform(-5,5), resample=Image.BICUBIC, expand=True)
-        y_off = y_center - rot.height//2 + random.randint(-4,4)
-        y_off = max(15, min(y_off, canvas_h - rot.height - 15))
-        img.alpha_composite(rot, (int(x), int(y_off)))
+        rot = li.rotate(random.uniform(-4,4), resample=Image.BICUBIC, expand=True)
+        y_off = y_center - rot.height//2 + random.randint(-3,3)
+        y_off = max(10, min(y_off, canvas_h - rot.height - 10))
+        tmp_img.alpha_composite(rot, (int(x), int(y_off)))
         x += lw - 6
-    img.save(path)
+    
+    bbox = tmp_img.getbbox()
+    if bbox:
+        cropped = tmp_img.crop(bbox)
+        final = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
+        fx = (canvas_w - cropped.width)//2
+        fy = (canvas_h - cropped.height)//2
+        final.alpha_composite(cropped, (fx, fy))
+        final.save(path)
+    else:
+        tmp_img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
     img = Image.new("RGBA", (W, 420), (0,0,0,0))
@@ -222,11 +234,11 @@ def render_final_fix(source, audio, headline, caps_video, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"<h1>{VERSION}</h1><p>2 linhas | 58% | Fix COMPARTIMENTOS MAX_W 980px | Espaco 40px</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
+    return f"<h1>{VERSION}</h1><p>FIX CENTRALIZACAO COMPARTIMENTOS | 2 linhas | 58%</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
-    return {"version":VERSION,"caption_y":CAPTION_Y,"fix":"COMPARTIMENTOS MAX_W 980px"}
+    return {"version":VERSION}
 
 @app.get("/render")
 async def render():
@@ -248,15 +260,14 @@ async def render():
         make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
-        out=folder/"final_v177e.mp4"
+        out=folder/"final_v177f.mp4"
         render_final_fix(src, audio_final, hl, caps_video, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v177e_estavel_compartimentos.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v177f_centralizado.mp4")
     except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(500, f"Erro V177e: {e}")
+        import traceback; print(traceback.format_exc())
+        raise HTTPException(500, f"Erro: {e}")
 
 if __name__=="__main__":
     import uvicorn, os
     port=int(os.getenv("PORT","8000"))
-    print(f"{VERSION} CAPTION_Y={CAPTION_Y}")
     uvicorn.run(app, host="0.0.0.0", port=port)
