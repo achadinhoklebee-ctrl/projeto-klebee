@@ -1,4 +1,3 @@
-
 """
 VIDEO-AUTORAL V177b - FIX CORTE HEADLINE E LEGENDA COMPARTIMENTOS
 Fix: 
@@ -14,7 +13,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V177-FINAL-2L-58-TUDO-CORRIGIDO"
+VERSION = "V177d-REGRA-PALAVRAS-GRANDES"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -55,12 +54,17 @@ def font(sz):
 
 def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=1080):
     """
-    FIX CORTE: auto-fit se palavra longa tipo COMPARTIMENTOS
-    Reduz fonte ate caber em W-40
+    REGRA FORTE PARA PALAVRAS GRANDES NAO ESTOURAREM LARGURA
+    Ex: COMPARTIMENTOS (14 letras) - tem que caber em 1080px
+    Se total > W-100, reduz fonte proporcionalmente ate caber, minimo 38pt
     """
-    # Tenta reduzir fonte se palavra muito longa
+    MAX_W = canvas_w - 100  # deixa 50px de margem cada lado
     cur_fsize = fsize
-    for attempt in range(5):
+    final_ws = []
+    final_total = 0
+    final_f = None
+    
+    for attempt in range(10):
         f = font(cur_fsize)
         dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
         letters = list(word.upper())
@@ -78,24 +82,36 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
                     w = cur_fsize*0.6
                 ws.append(w)
                 total += w + 6
-        if total <= canvas_w - 40 or cur_fsize <= 48:
+        # Verifica se cabe
+        if total <= MAX_W or cur_fsize <= 38:
+            final_ws = ws
+            final_total = total
+            final_f = f
             break
-        cur_fsize -= 8  # reduz e tenta de novo
+        # Nao cabe - reduz proporcionalmente
+        # Calcula fator de escala necessario
+        scale = MAX_W / total
+        cur_fsize = max(38, int(cur_fsize * scale * 0.92))
     
-    f = font(cur_fsize)
+    if not final_f:
+        final_f = font(cur_fsize)
+    
+    f = final_f
+    ws = final_ws
+    total = final_total
+    
     img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
     x = (canvas_w - total)//2
     y_center = canvas_h//2
     for i, lt in enumerate(list(word.upper())):
         if lt.strip() == "":
-            x += 14
+            x += 40
             continue
         bg, txt = random.choice(PALETTE)
         lw = int(ws[i] + 22)
         lh = int(cur_fsize * 1.2) + 12
         li = Image.new("RGBA", (lw, lh), (0,0,0,0))
         ImageDraw.Draw(li).rectangle([0,0,lw,lh], fill=bg)
-        # Centraliza letra na caixinha
         try:
             bb = ImageDraw.Draw(Image.new("RGBA",(1,1))).textbbox((0,0), lt, font=f)
             tw = bb[2]-bb[0]
@@ -107,7 +123,6 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         ty = (lh - th)//2 - 2
         ImageDraw.Draw(li).text((tx, ty), lt, font=f, fill=txt)
         rot = li.rotate(random.uniform(-5,5), resample=Image.BICUBIC, expand=True)
-        # FIX: garante que nao corta embaixo - margem 20px
         y_off = y_center - rot.height//2 + random.randint(-4,4)
         y_off = max(15, min(y_off, canvas_h - rot.height - 15))
         img.alpha_composite(rot, (int(x), int(y_off)))
@@ -267,4 +282,3 @@ async def render():
 if __name__=="__main__":
     import uvicorn, os
     port=int(os.getenv("PORT","8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
