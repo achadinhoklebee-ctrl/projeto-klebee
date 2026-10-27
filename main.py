@@ -1,4 +1,4 @@
-"""Super Robô Klebee — Motor Pro com Resposta Direta e Otimizada"""
+"""Super Robô Klebee — Motor Pro com Renderização Estável na Nuvem"""
 from __future__ import annotations
 import json, os, re, shutil, subprocess, uuid
 from pathlib import Path
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-ASS-FAST-2026-10-27"
+VERSION = "KLEBEE-PRO-STABLE-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -156,9 +156,10 @@ def probe_duration(path: Path) -> float:
 
 def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, duration: float):
     ass_path = str(ass.resolve()).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
-    graph = ("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
-             f"subtitles='{ass_path}'[subbed];[2:v]format=rgba[head];[subbed][head]overlay=0:120:shortest=1[vout]")
-    run([binary("ffmpeg"), "-y", "-stream_loop", "-1", "-i", str(source), "-i", str(audio), "-loop", "1", "-i", str(headline),
+    # Renderização direta e estável sem loop complexo que cause congelamento
+    graph = (f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
+             f"subtitles='{ass_path}'[subbed];[2:v]format=rgba[head];[subbed][head]overlay=0:120[vout]")
+    run([binary("ffmpeg"), "-y", "-i", str(source), "-i", str(audio), "-loop", "1", "-i", str(headline),
          "-filter_complex", graph, "-map", "[vout]", "-map", "1:a:0", "-t", f"{duration:.3f}", "-r", str(FPS),
          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)], 600)
     if not output.is_file() or output.stat().st_size < 100_000: raise RuntimeError("FFmpeg não produziu MP4 válido.")
@@ -189,7 +190,7 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         source = download(video_url, folder); audio = folder / "narration.mp3"
         narration_text = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         words = await make_voice(narration_text, audio); audio_duration = probe_duration(audio)
-        duration = min(16.0, max(12.0, audio_duration + 0.15))
+        duration = min(16.0, max(10.0, audio_duration + 0.15))
         ass = folder / "captions.ass"; make_ass(ass, words, duration)
         headline_img = folder / "headline.png"; make_headline(headline_img, headline)
         output = folder / "klebee_video.mp4"; render(source, audio, ass, headline_img, output, duration)
