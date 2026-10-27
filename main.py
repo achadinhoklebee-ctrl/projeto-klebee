@@ -1,10 +1,11 @@
-"""Super Robô Klebee — V150 - DEFINITIVO - SEM FUNDO PRETO + SINCRONIA PREMIERE"""
+"""Super Robô Klebee — V151 - MOTOR PREMIERE PRO REAL - SEM ASS KARAOKE"""
 from __future__ import annotations
 import os
 import shutil
 import subprocess
 import uuid
 import traceback
+import re
 from pathlib import Path
 from typing import Any
 import edge_tts
@@ -13,7 +14,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V150-DEFINITIVO"
+VERSION = "KLEBEE-V151-PREMIERE-REAL"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -23,22 +24,21 @@ VOICE = os.getenv("KLEBEE_TTS_VOICE", "pt-BR-AntonioNeural")
 RATE = os.getenv("KLEBEE_TTS_RATE", "+15%")
 FONT_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
 ]
 
-app = FastAPI(title="Super Robô Klebee — Pro Engine", version=VERSION)
+app = FastAPI(title="Super Robô Klebee", version=VERSION)
 
 def binary(name: str) -> str:
     path = shutil.which(name)
     if not path:
-        raise RuntimeError(f"Executavel obrigatorio ausente: {name}")
+        raise RuntimeError(f"Executavel ausente: {name}")
     return path
 
 def run(args: list[str], timeout: int = 400) -> subprocess.CompletedProcess:
     p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
-        raise RuntimeError(f"Comando falhou ({p.returncode}): {(p.stderr or p.stdout)[-2500:]}")
+        raise RuntimeError(f"Falhou ({p.returncode}): {(p.stderr or p.stdout)[-2500:]}")
     return p
 
 def font(size: int):
@@ -54,7 +54,7 @@ def wrap(draw, text, f, max_width):
     lines, cur = [], ""
     for w in text.split():
         cand = f"{cur} {w}".strip()
-        if draw.textbbox((0, 0), cand, font=f, stroke_width=12)[2] <= max_width:
+        if draw.textbbox((0, 0), cand, font=f, stroke_width=13)[2] <= max_width:
             cur = cand
         else:
             if cur:
@@ -65,22 +65,22 @@ def wrap(draw, text, f, max_width):
     return lines[:3]
 
 def make_headline(path: Path, text: str):
-    image = Image.new("RGBA", (W, 520), (0, 0, 0, 0))
+    image = Image.new("RGBA", (W, 480), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    size = 112
-    while size >= 62:
+    size = 110
+    while size >= 60:
         f = font(size)
-        if wrap(draw, text.upper(), f, W - 100):
+        if wrap(draw, text.upper(), f, W - 120):
             break
         size -= 2
-    f = font(max(size, 62))
-    lines = wrap(draw, text.upper(), f, W - 100) or [text.upper()]
-    y = 20
+    f = font(max(size, 60))
+    lines = wrap(draw, text.upper(), f, W - 120) or [text.upper()]
+    y = 15
     for line in lines:
         box = draw.textbbox((0, 0), line, font=f, stroke_width=13)
         x = (W - (box[2] - box[0])) // 2
         draw.text((x, y), line, font=f, fill="#FFE500", stroke_width=13, stroke_fill=(0, 0, 0, 255))
-        y += box[3] - box[1] + 18
+        y += box[3] - box[1] + 16
     image.save(path)
 
 def ass_time(s: float) -> str:
@@ -107,7 +107,7 @@ async def make_voice(text: str, path: Path) -> list[dict[str, Any]]:
             if w:
                 words.append({"text": w, "start": st, "end": st + dur})
     if not audio_bytes:
-        raise RuntimeError("Edge TTS nao gerou audio.")
+        raise RuntimeError("TTS sem audio")
     with path.open("wb") as f:
         f.write(audio_bytes)
     if not words:
@@ -117,7 +117,7 @@ async def make_voice(text: str, path: Path) -> list[dict[str, Any]]:
         words = [{"text": w, "start": i * step, "end": (i + 1) * step} for i, w in enumerate(clean)]
     return words
 
-def make_ass(path: Path, words: list[dict[str, Any]], duration: float):
+def make_ass_premiere(path: Path, words: list[dict[str, Any]], duration: float):
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -127,33 +127,58 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,DejaVu Sans,84,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,9,3,5,60,60,300,1
+Style: Caption,DejaVu Sans,86,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,2,5,80,80,320,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    groups = []
-    cur = []
+    # 1. Quebra por frase para NAO misturar frases
+    sentences = []
+    cur_sentence = []
     for w in words:
-        cur.append(w)
-        is_long = (w["end"] - cur[0]["start"]) > 1.2
-        is_many = len(cur) >= 4
-        is_pause = len(cur) > 1 and (w["start"] - cur[-2]["end"]) > 0.3
-        if is_long or is_many or is_pause:
-            groups.append(cur)
-            cur = []
-    if cur:
-        groups.append(cur)
+        cur_sentence.append(w)
+        if w["text"].endswith((".", "!", "?", ",")) or (len(cur_sentence) > 1 and w["start"] - cur_sentence[-2]["end"] > 0.5):
+            sentences.append(cur_sentence)
+            cur_sentence = []
+    if cur_sentence:
+        sentences.append(cur_sentence)
 
     events = []
-    for g in groups:
-        gs = g[0]["start"]
-        ge = min(duration, g[-1]["end"] + 0.25)
-        txt = ""
-        for w in g:
-            k = int(max(0.12, w["end"] - w["start"]) * 100)
-            txt += f"{{\\k{k}}}{esc_ass(w['text'])} "
-        events.append(f"Dialogue: 0,{ass_time(gs)},{ass_time(ge)},Caption,,0,0,0,,{txt.strip()}")
+    for sentence in sentences:
+        # 2. Quebra a frase em blocos de 3 palavras (padrao TikTok)
+        for i in range(0, len(sentence), 3):
+            block = sentence[i:i+3]
+            if not block:
+                continue
+            block_text = " ".join([esc_ass(x["text"]) for x in block])
+            # 3. Para cada palavra do bloco, cria um dialogo SEQUENCIAL
+            for idx, active_word in enumerate(block):
+                s = active_word["start"]
+                # Fim = inicio da proxima palavra, ou fim do bloco + 0.2
+                if idx + 1 < len(block):
+                    e = block[idx+1]["start"]
+                else:
+                    # Ultima palavra do bloco segura mais tempo
+                    if i + 3 < len(sentence):
+                        e = sentence[i+3]["start"] - 0.05
+                    else:
+                        e = min(duration, active_word["end"] + 0.35)
+                e = max(s + 0.15, e)
+                # Monta o texto com a palavra ativa em amarelo
+                parts = []
+                for j, w in enumerate(block):
+                    token = esc_ass(w["text"])
+                    if j == idx:
+                        parts.append(f"{{\\c&H00E5FF&\\b1}}{token}{{\\c&HFFFFFF&\\b0}}")
+                    else:
+                        parts.append(token)
+                line = " ".join(parts)
+                # Quebra em 2 linhas se necessario (visual)
+                if len(block) > 2:
+                    # Forca quebra visual no ASS com \\N
+                    if len(parts) == 3:
+                        line = f"{parts[0]} {parts[1]}\\N{parts[2]}"
+                events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line}")
 
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
@@ -172,7 +197,7 @@ def download(url: str, folder: Path) -> Path:
         ydl.extract_info(url, download=True)
     cands = [p for p in folder.glob("source.*") if p.is_file() and p.stat().st_size > 100_000]
     if not cands:
-        raise RuntimeError("Download sem arquivo valido.")
+        raise RuntimeError("Sem video valido")
     return max(cands, key=lambda p: p.stat().st_size)
 
 def probe_duration(path: Path) -> float:
@@ -191,7 +216,7 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS}[bg]; "
             f"[bg][2:v]overlay=0:45[with_headline]; "
             f"[with_headline]ass='{ass_path}'[v]; "
-            f"[0:a]volume=0.22[a_music]; "
+            f"[0:a]volume=0.20[a_music]; "
             f"[1:a]volume=1.15[a_voice]; "
             f"[a_music][a_voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a_final]"
         ),
@@ -209,21 +234,15 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>Super Robo Klebee V150</title>
-    <style>body{background:#0f172a;color:#f8fafc;font-family:Arial;text-align:center;padding:60px 15px}.card{background:#1e293b;padding:40px;border-radius:16px;display:inline-block;max-width:650px}.btn{background:#22c55e;color:white;padding:18px 36px;text-decoration:none;border-radius:10px;font-weight:bold;display:inline-block;margin-top:20px}</style>
-    </head>
-    <body><div class="card">
-    <h1>ROBO KLEBEE V150 - DEFINITIVO</h1>
-    <p>Headline transparente + Legenda Premiere Pro sincronizada</p>
-    <a class="btn" href="/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA">GERAR VIDEO V150</a>
-    </div></body></html>
+    <html><head><meta charset="UTF-8"><title>Klebee V151</title>
+    <style>body{background:#0f172a;color:#fff;font-family:Arial;text-align:center;padding:60px} .card{background:#1e293b;padding:40px;border-radius:16px;display:inline-block} .btn{background:#22c55e;color:white;padding:18px 36px;border-radius:10px;text-decoration:none;font-weight:bold}</style>
+    </head><body><div class="card"><h1>KLEBEE V151 - PREMIERE REAL</h1><p>Sem fundo preto + Legenda sem misturar frases</p>
+    <a class="btn" href="/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA">GERAR V151</a></div></body></html>
     """
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": VERSION, "ffmpeg": shutil.which("ffmpeg") or "missing"}
+    return {"status": "ok", "version": VERSION}
 
 @app.get("/render-web")
 async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!")):
@@ -238,16 +257,15 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         audio_duration = probe_duration(audio)
         duration = min(16.0, max(10.0, audio_duration + 0.2))
         ass = folder / "captions.ass"
-        make_ass(ass, words, duration)
+        make_ass_premiere(ass, words, duration)
         headline_img = folder / "headline.png"
         make_headline(headline_img, headline)
         output = folder / "klebee_video.mp4"
         render(source, audio, ass, headline_img, output, duration)
-        return FileResponse(output, media_type="video/mp4", filename="super_robo_klebee_v150.mp4")
+        return FileResponse(output, media_type="video/mp4", filename="klebee_v151.mp4")
     except Exception as e:
-        err_msg = traceback.format_exc()
-        print(f"ERRO CRITICO NO JOB {job}:\n{err_msg}")
-        raise HTTPException(status_code=500, detail=f"Erro na renderizacao: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
