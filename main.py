@@ -1,6 +1,6 @@
-"""Super Robô Klebee — Motor Pro Otimizado para Cloud (Railway)"""
+"""Super Robô Klebee — Motor Pro Otimizado para Cloud com Logs Detalhados"""
 from __future__ import annotations
-import os, shutil, subprocess, uuid
+import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
 from typing import Any
 import edge_tts
@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-ULTRA-2026-10-27"
+VERSION = "KLEBEE-PRO-LOGS-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -226,23 +226,12 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
     folder = JOBS / job
     folder.mkdir(parents=True, exist_ok=False)
     try:
+        print(f"[{job}] Iniciando download de: {video_url}")
         source = download(video_url, folder)
+        print(f"[{job}] Download concluído. Gerando áudio TTS...")
         audio = folder / "narration.mp3"
         narration_text = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         words = await make_voice(narration_text, audio)
         audio_duration = probe_duration(audio)
         duration = min(16.0, max(10.0, audio_duration + 0.15))
-        ass = folder / "captions.ass"
-        make_ass(ass, words, duration)
-        headline_img = folder / "headline.png"
-        make_headline(headline_img, headline)
-        output = folder / "klebee_video.mp4"
-        render(source, audio, ass, headline_img, output, duration)
-        return FileResponse(output, media_type="video/mp4", filename="super_robo_klebee_pro.mp4")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro na renderização: {e}")
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        print(f"[{job}] Áudio gerado. Duração: {duration}s. Criando legendas e headline...")
