@@ -3,10 +3,11 @@ import re
 import hashlib
 import asyncio
 import subprocess
+import tempfile
 from pathlib import Path
 
 import edge_tts
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import (
@@ -15,7 +16,7 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import volumex, audio_fadein, audio_fadeout
 
-APP_VERSION = "KLEBEE-DYNAMIC-WORDS-2026-10-26-01"
+APP_VERSION = "KLEBEE-ASS-KARAOKE-QA-2026-10-27-01"
 app = FastAPI(title="Klebee Cloud Engine - Dynamic Captions", version=APP_VERSION)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,7 @@ os.makedirs(CACHE_AUDIO_DIR, exist_ok=True)
 WIDTH, HEIGHT = 1080, 1920
 VOICE = "pt-BR-AntonioNeural"
 VOICE_RATE = "+15%"
+# Ajustáveis conforme a interface da Shopee.
 HEADLINE_Y = 170
 CAPTION_Y = 1270
 CAPTION_H = 300
@@ -97,24 +99,8 @@ async def gerar_audio_com_timestamps(texto: str):
             for w in words:
                 f.write(f'{w["start"]:.6f}\t{w["end"]:.6f}\t{w["text"]}\n')
     else:
-        raise RuntimeError("O Edge TTS não retornou eventos WordBoundary.")
+        raise RuntimeError("O Edge TTS não retornou eventos WordBoundary; não é possível garantir sincronização por palavra.")
     return audio_path, words
-
-
-def carregar_fonte(tamanho: int):
-    paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for path in paths:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, tamanho)
-            except OSError:
-                pass
-    return ImageFont.load_default()
 
 
 def limpar_texto_visual(texto: str) -> str:
@@ -123,131 +109,103 @@ def limpar_texto_visual(texto: str) -> str:
     return texto
 
 
-def medir(draw, texto, fonte):
-    box = draw.textbbox((0, 0), texto, font=fonte, stroke_width=0)
-    return box[2] - box[0], box[3] - box[1]
+def ass_time(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def quebrar_por_pixels(draw, palavras, fonte, max_width):
-    linhas, atual = [], ""
-    for palavra in palavras:
-        teste = palavra if not atual else atual + " " + palavra
-        largura, _ = medir(draw, teste, fonte)
-        if largura <= max_width or not atual:
-            atual = teste
-        else:
-            linhas.append(atual)
-            atual = palavra
-    if atual:
-        linhas.append(atual)
-    return linhas
+def ass_safe(text: str) -> str:
+    text = limpar_texto_visual(str(text))
+    return text.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ").strip()
 
 
-def criar_overlay_headline(texto: str, largura=WIDTH, altura=250) -> str:
-    texto = limpar_texto_visual(texto)
-    img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    max_width = largura - 2 * SIDE_MARGIN
-    font_size = 76
-    while font_size >= 42:
-        font = carregar_fonte(font_size)
-        linhas = quebrar_por_pixels(draw, texto.split(), font, max_width)
-        if len(linhas) <= 2 and all(medir(draw, line, font)[0] <= max_width for line in linhas):
-            break
-        font_size -= 2
-    line_heights = [medir(draw, line, font)[1] for line in linhas]
-    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 7
-    y = max(5, (altura - total_h) // 2)
-    for linha, h in zip(linhas, line_heights):
-        w, _ = medir(draw, linha, font)
-        x = (largura - w) // 2
-        draw.text((x, y), linha, font=font, fill="#FFE500",
-                  stroke_width=5, stroke_fill="#111111")
-        y += h + 7
-    path = os.path.join(CACHE_AUDIO_DIR, "headline_" +
-                        hashlib.md5(texto.encode("utf-8")).hexdigest() + ".png")
-    img.save(path)
-    return path
+def criar_legendas_ass(words, duration: float, headline: str, ass_path: str) -> int:
+    valid = []
+    for w in words:
+        txt = ass_safe(w.get("text", ""))
+        try:
+            start, end = float(w["start"]), float(w["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if txt and 0 <= start < duration and end > start:
+            valid.append({"text": txt, "start": start, "end": min(duration, end)})
+    valid.sort(key=lambda x: x["start"])
+    if not valid:
+        raise RuntimeError("Validação falhou: não há timestamps de palavras válidos para as legendas.")
 
+    header = r'''[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
 
-def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
-                                    altura=CAPTION_H) -> str:
-    palavras = [limpar_texto_visual(w) for w in palavras_grupo]
-    palavras = [w for w in palavras if w]
-    if not palavras:
-        palavras = [" "]
-    img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    max_width = largura - 2 * SIDE_MARGIN - 42
-    font_size = 54
-    while font_size >= 34:
-        font = carregar_fonte(font_size)
-        linhas = []
-        linha_indices = []
-        current, current_idx = [], []
-        for idx, palavra in enumerate(palavras):
-            teste = " ".join(current + [palavra])
-            if current and medir(draw, teste, font)[0] > max_width:
-                linhas.append(current)
-                linha_indices.append(current_idx)
-                current, current_idx = [palavra], [idx]
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Headline,DejaVu Sans,78,&H0000E5FF,&H0000E5FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,2,5,70,70,0,1
+Style: Karaoke,DejaVu Sans,60,&H0000E5FF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,4,2,5,70,70,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+'''
+    events = []
+    clean_head = ass_safe(headline)
+    if clean_head:
+        title_words = clean_head.split()
+        lines, line = [], []
+        for word in title_words:
+            if len(" ".join(line + [word])) > 22 and line:
+                lines.append(" ".join(line)); line = [word]
             else:
-                current.append(palavra)
-                current_idx.append(idx)
-        if current:
-            linhas.append(current)
-            linha_indices.append(current_idx)
-        widths = [medir(draw, " ".join(line), font)[0] for line in linhas]
-        heights = [medir(draw, " ".join(line), font)[1] for line in linhas]
-        if max(widths, default=0) <= max_width and len(linhas) <= 3:
-            break
-        font_size -= 2
+                line.append(word)
+        if line: lines.append(" ".join(line))
+        title_text = r"\N".join(lines[:2])
+        events.append(f"Dialogue: 2,{ass_time(0)},{ass_time(duration)},Headline,,0,0,0,,{{\\an5\\pos(540,220)}}{title_text}")
 
-    pad_x, pad_y, gap = 28, 17, 9
-    box_w = min(largura - 2 * SIDE_MARGIN, max(widths, default=100) + 2 * pad_x)
-    box_h = sum(heights) + max(0, len(heights)-1) * gap + 2 * pad_y
-    bx, by = (largura-box_w)//2, (altura-box_h)//2
-    draw.rounded_rectangle((bx, by, bx+box_w, by+box_h), radius=18,
-                           fill=(0, 0, 0, 185))
-    y = by + pad_y
-    for line, ids, h in zip(linhas, linha_indices, heights):
-        widths_words = [medir(draw, word, font)[0] for word in line]
-        spaces = medir(draw, " ", font)[0]
-        line_w = sum(widths_words) + spaces * max(0, len(line)-1)
-        x = (largura-line_w)//2
-        for word, idx, ww in zip(line, ids, widths_words):
-            color = "#FFE500" if idx == indice_ativo else "#FFFFFF"
-            draw.text((x, y), word, font=font, fill=color,
-                      stroke_width=2, stroke_fill="#111111")
-            x += ww + spaces
-        y += h + gap
-
-    key = hashlib.md5(( "|".join(palavras) + f"_{indice_ativo}_{font_size}" ).encode("utf-8")).hexdigest()
-    path = os.path.join(CACHE_AUDIO_DIR, f"caption_{key}.png")
-    img.save(path)
-    return path
-
-
-def montar_clips_legenda(words, duracao):
-    clips = []
     group_size = 4
-    for group_start in range(0, len(words), group_size):
-        group = words[group_start:group_start + group_size]
-        for local_idx, word in enumerate(group):
-            start = max(0.0, float(word["start"]))
-            end = min(float(duracao), max(start + 0.06, float(word["end"])))
-            if start >= duracao or end <= start:
-                continue
-            if local_idx + 1 < len(group):
-                end = min(duracao, max(end, float(group[local_idx + 1]["start"])))
-            path = criar_overlay_legenda_palavra(
-                [w["text"] for w in group], local_idx
-            )
-            clips.append(
-                ImageClip(path).set_start(start).set_duration(max(0.06, end-start))
-                .set_pos(("center", CAPTION_Y))
-            )
-    return clips
+    for offset in range(0, len(valid), group_size):
+        group = valid[offset:offset + group_size]
+        start = group[0]["start"]
+        if offset + group_size < len(valid):
+            end = max(group[-1]["end"], valid[offset + group_size]["start"])
+        else:
+            end = max(group[-1]["end"], min(duration, group[-1]["start"] + 0.25))
+        end = min(duration, max(start + 0.08, end))
+        chunks = []
+        for i, word in enumerate(group):
+            next_start = group[i + 1]["start"] if i + 1 < len(group) else end
+            cs = max(1, round(max(0.01, next_start - word["start"]) * 100))
+            chunks.append(f"{{\\k{cs}}}{word['text']}")
+        text_line = " ".join(chunks)
+        events.append(f"Dialogue: 1,{ass_time(start)},{ass_time(end)},Karaoke,,0,0,0,,{{\\an5\\pos(540,1320)}}{text_line}")
+
+    with open(ass_path, "w", encoding="utf-8-sig", newline="\n") as f:
+        f.write(header + "\n".join(events) + "\n")
+    if len(events) < 2:
+        raise RuntimeError("Validação falhou: o arquivo ASS não contém headline e legendas.")
+    return len(valid)
+
+
+def validar_mp4(path: str, min_size: int = 100_000):
+    if not os.path.exists(path) or os.path.getsize(path) < min_size:
+        raise RuntimeError("Validação do vídeo falhou: arquivo ausente ou pequeno demais.")
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height", "-of", "json", path],
+        capture_output=True, text=True, timeout=20
+    )
+    if probe.returncode != 0:
+        raise RuntimeError("Validação do vídeo falhou: ffprobe não conseguiu ler o MP4.")
+    import json
+    data = json.loads(probe.stdout or "{}")
+    streams = data.get("streams", [])
+    if not any(s.get("codec_type") == "video" for s in streams):
+        raise RuntimeError("Validação do vídeo falhou: MP4 sem faixa de vídeo.")
+    if not any(s.get("codec_type") == "audio" for s in streams):
+        raise RuntimeError("Validação do vídeo falhou: MP4 sem faixa de áudio.")
+    return {"bytes": os.path.getsize(path), "streams": streams, "duration": data.get("format", {}).get("duration")}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -287,9 +245,8 @@ def health():
 def version():
     return {
         "app_version": APP_VERSION,
-        "caption_mode": "word-boundary-highlight",
-        "headline_y": HEADLINE_Y,
-        "caption_y": CAPTION_Y,
+        "caption_mode": "ASS-karaoke-word-highlight",
+        "render_validation": "ffprobe + nonempty output + burned subtitles",
     }
 
 
@@ -341,23 +298,44 @@ def render(video_url: str = Query(
         else:
             audio_final = narracao_audio.fx(volumex, 1.0).set_duration(duracao_alvo)
 
-        path_head = criar_overlay_headline(headline)
-        headline_clip = ImageClip(path_head).set_start(0).set_duration(duracao_alvo).set_pos(("center", HEADLINE_Y))
-        clips_to_close.append(headline_clip)
-
-        caption_clips = montar_clips_legenda(word_events, duracao_alvo)
-        clips_to_close.extend(caption_clips)
-        video_final = CompositeVideoClip([video_base, headline_clip] + caption_clips,
-                                         size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
-        clips_to_close.append(video_final)
-
-        output_name = f"klebee_dynamic_v1_{os.urandom(4).hex()}.mp4"
+        output_name = f"klebee_ass_karaoke_{os.urandom(4).hex()}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_name)
+        raw_path = os.path.join(OUTPUT_DIR, f"raw_{output_name}")
+        ass_path = os.path.join(CACHE_AUDIO_DIR, f"subs_{os.urandom(4).hex()}.ass")
+
+        video_final = CompositeVideoClip([video_base], size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
+        clips_to_close.append(video_final)
         video_final.write_videofile(
-            output_path, fps=24, codec="libx264", audio_codec="aac",
+            raw_path, fps=24, codec="libx264", audio_codec="aac",
             preset="ultrafast", threads=2, logger=None,
             ffmpeg_params=["-movflags", "+faststart"]
         )
+
+        total_words = criar_legendas_ass(word_events, duracao_alvo, headline, ass_path)
+        ass_filter_path = ass_path.replace("\\", "/").replace(":", r"\\:").replace("'", r"\\'")
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", raw_path,
+            "-vf", f"ass='{ass_filter_path}'",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            "-c:a", "copy", "-movflags", "+faststart", output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if result.returncode != 0:
+            raise RuntimeError("FFmpeg/libass não conseguiu aplicar as legendas: " + (result.stderr[-1200:] or "erro desconhecido"))
+        
+        qa = validar_mp4(output_path)
+        report_path = output_path + ".qa.json"
+        import json
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump({"version": APP_VERSION, "caption_engine": "ASS karaoke", "word_count": total_words, "headline": headline, "validation": qa}, f, ensure_ascii=False, indent=2)
+        
+        try:
+            os.remove(raw_path)
+            os.remove(ass_path)
+        except OSError:
+            pass
+
         return FileResponse(output_path, media_type="video/mp4", filename=output_name)
     except Exception as exc:
         return {"status": "ERRO_RENDER", "detalhe": str(exc)}
