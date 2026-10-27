@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V159 - 【entity-PREMIERE PRO¦canonical_name=Premiere Pro】 REAL - PNG POR PALAVRA - SEM .ASS"""
+"""Super Robô Klebee — V160 - FIX ESTOURO E REPETICAO - TIKTOK VIRAL 3 PALAVRAS"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V159-PNG-PREMIERE"
+VERSION = "KLEBEE-V160-TIKTOK-3-PALAVRAS"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def wrap(draw, text, f, max_width):
     lines, cur = [], ""
     for w in text.split():
         cand = f"{cur} {w}".strip()
-        if draw.textbbox((0,0), cand, font=f, stroke_width=10)[2] <= max_width:
+        if draw.textbbox((0,0), cand, font=f, stroke_width=13)[2] <= max_width:
             cur = cand
         else:
             if cur: lines.append(cur)
@@ -67,57 +67,38 @@ def make_headline(path: Path, text: str):
         y += box[3]-box[1]+16
     image.save(path)
 
-def make_caption_png(path: Path, words: list[str], active_idx: int):
-    """Gera 1 PNG com frase completa, só active em amarelo"""
-    img = Image.new("RGBA", (W, 400), (0,0,0,0))
+def make_caption_png_tiktok(path: Path, window_words: list[str], active_pos_in_window: int):
+    """Gera 1 PNG com 3 palavras max, só 1 amarela - SEM ESTOURO"""
+    img = Image.new("RGBA", (W, 350), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-    f = font(68)
+    f = font(82)
     
-    # Monta linhas com quebra inteligente - max 3 palavras por linha para não cortar borda
-    text = " ".join(words)
-    # Limita a frase para fazer sentido: pega janela de 5 palavras em torno da ativa
-    start = max(0, active_idx - 2)
-    end = min(len(words), active_idx + 3)
-    window = words[start:end]
+    # Mede largura real de cada palavra com stroke para não estourar
+    widths = []
+    for w in window_words:
+        bbox = draw.textbbox((0,0), w+" ", font=f, stroke_width=10)
+        widths.append(bbox[2]-bbox[0])
     
-    lines = []
-    cur_line = []
-    for w in window:
-        cur_line.append(w)
-        if len(cur_line) >= 4:  # 4 palavras por linha max
-            lines.append(cur_line)
-            cur_line = []
-    if cur_line:
-        lines.append(cur_line)
-    if len(lines) > 2: lines = lines[:2]  # Max 2 linhas
+    total_w = sum(widths)
+    # Se estourar 1080, reduz fonte automaticamente
+    if total_w > W-120:
+        f = font(68)
+        widths=[]
+        for w in window_words:
+            bbox = draw.textbbox((0,0), w+" ", font=f, stroke_width=10)
+            widths.append(bbox[2]-bbox[0])
+        total_w = sum(widths)
     
-    y = 10
-    for line_words in lines:
-        # Calcula largura total da linha
-        line_text = " ".join(line_words)
-        bbox = draw.textbbox((0,0), line_text, font=f, stroke_width=9)
-        total_w = bbox[2]-bbox[0]
-        x = (W - total_w)//2
-        
-        for w in line_words:
-            global_idx = words.index(w, start) if w in words[start:end] else -1
-            # Verifica se é a palavra ativa
-            is_active = (window.index(w) + start == active_idx) if w in window else False
-            
-            # Calcula bbox da palavra
-            wb = draw.textbbox((0,0), w+" ", font=f, stroke_width=9)
-            ww = wb[2]-wb[0]
-            
-            color = "#FFE500" if is_active else "#FFFFFF"
-            # Desenha com contorno preto grosso estilo TikTok
-            draw.text((x, y), w, font=f, fill=color, stroke_width=9, stroke_fill=(0,0,0,255))
-            x += ww
-        y += 80
-
+    x = (W - total_w)//2
+    y = 80
+    
+    for i, w in enumerate(window_words):
+        is_active = (i == active_pos_in_window)
+        color = "#FFE500" if is_active else "#FFFFFF"
+        draw.text((x, y), w, font=f, fill=color, stroke_width=10, stroke_fill=(0,0,0,255))
+        x += widths[i]
+    
     img.save(path)
-
-def esc_filter_path(p: Path) -> str:
-    return str(p.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
 
 async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: float):
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
@@ -149,41 +130,30 @@ def probe_duration(path: Path) -> float:
     except: return 10.0
 
 def render_png_sequence(source, audio, headline, caption_pngs, words, output, duration):
-    # Constrói filter_complex com overlays encadeados com enable=between
-    # Inputs: 0:v source, 1:a audio, 2:v headline, 3:v cap0, 4:v cap1...
     filters = []
-    # Primeiro scale e crop
     filters.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg]")
     last = "[bg]"
     next_idx = 0
     filters.append(f"{last}[2:v]overlay=0:45[tmp{next_idx}]")
-    last = f"[tmp{next_idx}]"
-    next_idx+=1
+    last = f"[tmp{next_idx}]"; next_idx+=1
 
-    # Overlays de legenda com tempo
     for i, (png_path, w) in enumerate(zip(caption_pngs, words)):
         s = w["start"]
         e = min(duration, w["end"])
-        # Input index para este png = 3 + i
         input_label = f"[{3+i}:v]"
-        filters.append(f"{last}{input_label}overlay=(W-w)/2:H-380:enable='between(t,{s:.3f},{e:.3f})'[tmp{next_idx}]")
-        last = f"[tmp{next_idx}]"
-        next_idx+=1
+        filters.append(f"{last}{input_label}overlay=(W-w)/2:H-360:enable='between(t,{s:.3f},{e:.3f})'[tmp{next_idx}]")
+        last = f"[tmp{next_idx}]"; next_idx+=1
 
-    # Audio mix
     filters.append(f"[0:a]volume=0.18[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]")
-
     filter_complex = ";".join(filters)
 
     cmd = [binary("ffmpeg"),"-y","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",str(headline)]
-    # Adiciona todos os pngs como inputs
-    for p in caption_pngs:
-        cmd.extend(["-i", str(p)])
+    for p in caption_pngs: cmd.extend(["-i", str(p)])
     cmd.extend(["-filter_complex", filter_complex, "-map", last, "-map", "[a_final]", "-t", f"{duration:.3f}", "-threads","4","-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k", str(output)])
-    run(cmd,500)
+    run(cmd,600)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<h1>KLEBEE V159 - PNG PREMIERE</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V159</a>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V160 - FIX ESTOURO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V160</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -205,17 +175,32 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         duration=min(16.0, max(10.5, audio_dur + 0.5))
         words=await make_voice_and_words_real_time(txt,audio,duration)
 
-        # Gera 1 PNG por palavra com frase com sentido
+        # JANELA DE 3 PALAVRAS COM SENTIDO - PADRÃO TIKTOK
         all_texts = [w["text"] for w in words]
         caption_pngs=[]
-        for i, w in enumerate(words):
+        for i in range(len(all_texts)):
+            # Pega janela de 3: anterior, atual, próxima
+            start = max(0, i-1)
+            end = min(len(all_texts), i+2)
+            window = all_texts[start:end]
+            active_pos = i - start
+            
+            # Ajusta para sempre ter 3 palavras quando possível para não pular
+            if len(window) < 3 and len(all_texts) >= 3:
+                if start == 0:
+                    window = all_texts[0:3]
+                    active_pos = i
+                elif end == len(all_texts):
+                    window = all_texts[-3:]
+                    active_pos = i - (len(all_texts)-3)
+            
             p = caps_dir / f"cap_{i:03d}.png"
-            make_caption_png(p, all_texts, i)
+            make_caption_png_tiktok(p, window, active_pos)
             caption_pngs.append(p)
 
         hl=folder/"headline.png"; make_headline(hl,headline)
         out=folder/"klebee.mp4"; render_png_sequence(source,audio,hl,caption_pngs,words,out,duration)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v159.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v160.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
