@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V175 - FIX TOTAL - 72PT + HEADLINE LEGIVEL + ZERO ATRASO"""
+"""Super Robô Klebee — V175.1 - FIX SYNTAX SHOPEE_ORANGE - MESMO V175"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time, random
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V175-FIX-TOTAL"
+VERSION = "KLEBEE-V175.1-FIX-SYNTAX"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -16,9 +16,9 @@ JOBS.mkdir(parents=True, exist_ok=True)
 W, H = 1080, 1920
 VOICE = "pt-BR-FranciscaNeural"
 RATE = "+10%"
-【entity-SHOPEE_ORANGE¦canonical_name=Shopee】 = "#FF6B00"
+ORANGE = "#FF6B00"
 
-PALETTE = [("#FFEB3B","black"),("#E91E63","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#FF9800","black"),("#4CAF50","white"),("#F9F9F9","black")]
+PALETTE = [("#FFEB3B","black"),("#E91E63","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#FF9800","black"),("#4CAF50","white")]
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf","/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
 
@@ -47,11 +47,9 @@ def font(sz: int):
     return ImageFont.load_default()
 
 def make_ransom_72pt_center(path: Path, word: str):
-    # FIX LARGURA + CORTE: 72pt, 22px por letra, canvas 600px centrado
     f = font(72)
     img = Image.new("RGBA", (W, 600), (0,0,0,0))
     letters = list(word.upper())
-    # estima largura real com 72pt
     total_w = 0
     ws = []
     dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
@@ -63,10 +61,8 @@ def make_ransom_72pt_center(path: Path, word: str):
             w = bb[2]-bb[0]
             ws.append(w)
             total_w += w + 6
-    
     x = (W - total_w)//2
     y_center = 300
-    
     for i, lt in enumerate(letters):
         if lt.strip() == "":
             x+=14; continue
@@ -78,10 +74,9 @@ def make_ransom_72pt_center(path: Path, word: str):
         ld = ImageDraw.Draw(li)
         ld.rectangle([0,0,lw,lh], fill=bg)
         ld.text((11, 10), lt, font=f, fill=txt)
-        ang = random.uniform(-6, 6)  # menos rotação pra não estourar
+        ang = random.uniform(-6, 6)
         rot = li.rotate(ang, resample=Image.BICUBIC, expand=True)
         y_off = y_center - rot.height//2 + random.randint(-6,6)
-        # garante não cortar embaixo
         if y_off + rot.height > 590:
             y_off = 590 - rot.height
         if y_off < 5:
@@ -91,19 +86,12 @@ def make_ransom_72pt_center(path: Path, word: str):
     img.save(path)
 
 def make_headline_legivel_bonita(path: Path, text: str):
-    # HEADLINE LEGIVEL QUE IMPRESSIONA: texto branco/preto limpo, sem stroke 12px preto
     img = Image.new("RGBA", (W, 780), (0,0,0,0))
     parts = text.upper().split()
     l1 = parts[0] if parts else "ACHADINHO"
     l2 = " ".join(parts[1:3]) if len(parts)>2 else "QUE FACILITA"
     l3 = " ".join(parts[3:5]) if len(parts)>3 else "SUA VIDA"
-    
-    configs = [
-        (l1, 130, 【entity-SHOPEE_ORANGE¦canonical_name=Shopee】, "#000000"),  # laranja em fundo preto - LEGIVEL
-        (l2, 72, "black", "#FFEB3B"),          # preto em fundo amarelo - LEGIVEL
-        (l3, 82, "white", 【entity-SHOPEE_ORANGE¦canonical_name=Shopee】),      # branco em fundo laranja - LEGIVEL
-    ]
-    
+    configs = [(l1, 130, ORANGE, "#000000"), (l2, 72, "black", "#FFEB3B"), (l3, 82, "white", ORANGE)]
     y = 12
     for idx, (line, fsize, txt_color, bg_color) in enumerate(configs):
         f = font(fsize)
@@ -113,10 +101,8 @@ def make_headline_legivel_bonita(path: Path, text: str):
         th = bb[3]-bb[1] + 30
         pill = Image.new("RGBA", (tw+20, th+18), (0,0,0,0))
         pd = ImageDraw.Draw(pill)
-        # sombra suave, não preta pesada
         pd.rounded_rectangle([6,8,tw+14,th+12], radius=16, fill=(0,0,0,180))
         pd.rounded_rectangle([0,0,tw+8,th+6], radius=16, fill=bg_color)
-        # TEXTO SEM STROKE PRETO GROSSO - só branco/preto limpo
         pd.text((12, 6), line, font=f, fill=txt_color)
         ang = [-2.0, 1.8, -0.8][idx]
         rot = pill.rotate(ang, resample=Image.BICUBIC, expand=True)
@@ -162,7 +148,7 @@ async def get_words(text: str, audio_path: Path):
         return [{"text":w,"start":i*tpw,"end":(i+1)*tpw} for i,w in enumerate(clean)], 9.0
     last_raw=max(w["raw_end"] for w in raw)
     ad=probe(audio_path)
-    target=max(0.5, ad - 0.01)  # termina em audio - 0.01
+    target=max(0.5, ad - 0.01)
     scale=target/max(0.1, last_raw)
     words=[]
     for w in raw:
@@ -200,7 +186,7 @@ def clean():
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V175 - FIX TOTAL</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V175</a>")
+    return HTMLResponse("<h1>V175.1 - FIX SYNTAX</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V175.1</a>")
 
 @app.get("/health")
 def health():
@@ -220,8 +206,6 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         import shutil
         shutil.copy(tmp, audio)
         last=max(w["end"] for w in words)
-        # FIX ATRASO: dur = last + 0.08, não ad + 0.12
-        dur = last + 0.08
         scale=(ad - 0.01)/max(0.1, last-0.03)
         final=[]
         for w in words:
@@ -229,7 +213,6 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
             e=(w["end"]-0.03)*scale+0.03
             final.append({"text":w["text"],"start":s,"end":e})
         dur = max(w["end"] for w in final) + 0.08
-        
         caps=[]
         for i,w in enumerate(final):
             p=caps_dir/f"cap_{i:03d}.png"
@@ -239,7 +222,7 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         make_headline_legivel_bonita(hl, headline)
         out=folder/"final.mp4"
         render(src, audio, hl, caps, final, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v175.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v175_1.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
