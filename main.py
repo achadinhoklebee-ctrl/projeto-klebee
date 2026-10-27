@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V168 - DEFINITIVO - FIX AMIX INFINITO + FPS 30 - VOLTA V157"""
+"""Super Robô Klebee — V169 - FIX THREADS 60 -> 2 - DEFINITIVO - NAO DA MAIS -9"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V168-FIX-AMIX-FPS"
+VERSION = "KLEBEE-V169-THREADS-FIX"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -32,7 +32,9 @@ def binary(n: str) -> str:
 def run(args, timeout=400):
     p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
-        raise RuntimeError(f"Erro {p.returncode}: {p.stderr[-4000:]} {p.stdout[-1000:]}")
+        # Mostra só últimas 2000 chars pra não quebrar JSON
+        err = (p.stderr or p.stdout)[-2000:]
+        raise RuntimeError(f"Erro {p.returncode}: {err}")
     return p
 
 def font(sz: int):
@@ -118,12 +120,11 @@ def probe(p: Path) -> float:
         return 10.0
 
 def render_definitivo(source, audio, headline, ass_p, out, dur):
-    # FIX DEFINITIVO: FILTRO IGUAL V157 QUE FUNCIONAVA
-    # 1. fps=30 + setpts para corrigir 15360 tbn
-    # 2. amix com narração primeiro [1:a][0:a] duration=first para não ser infinito
+    # FIX THREADS 60 -> 2 - IGUAL V157 QUE FUNCIONAVA
     ass_path = str(ass_p.resolve()).replace(":", "\\:").replace("'", "")
     cmd = [
         binary("ffmpeg"),"-y",
+        "-threads","2",
         "-stream_loop","1","-i",str(source),
         "-i",str(audio),
         "-i",str(headline),
@@ -131,7 +132,8 @@ def render_definitivo(source, audio, headline, ass_p, out, dur):
         f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg];[bg][2:v]overlay=0:30[hd];[hd]ass='{ass_path}'[v];[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]",
         "-map","[v]","-map","[a]",
         "-t",f"{dur:.2f}",
-        "-c:v","libx264","-preset","veryfast","-crf","23",
+        "-threads","2",
+        "-c:v","libx264","-preset","ultrafast","-crf","26","-x264-params","threads=2",
         "-c:a","aac","-b:a","128k",
         str(out)
     ]
@@ -140,14 +142,14 @@ def render_definitivo(source, audio, headline, ass_p, out, dur):
 def clean():
     try:
         for d in JOBS.glob("*"):
-            if d.is_dir() and time.time()-d.stat().st_mtime>1800:
+            if d.is_dir() and time.time()-d.stat().st_mtime>900:
                 shutil.rmtree(d, ignore_errors=True)
     except:
         pass
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V168 DEFINITIVO - FIX AMIX</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V168</a>")
+    return HTMLResponse("<h1>V169 - FIX THREADS - DEFINITIVO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V169</a>")
 
 @app.get("/health")
 def health():
@@ -189,7 +191,7 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         make_headline_print4(hl, headline)
         out = folder/"final.mp4"
         render_definitivo(src, audio, hl, ass, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v168.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v169.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
