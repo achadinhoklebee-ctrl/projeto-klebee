@@ -68,13 +68,13 @@ def carregar_fonte(tamanho):
                 pass
     return ImageFont.load_default()
 
-def criar_overlay_headline(texto, largura=1080, altura=200):
-    """Gera uma headline profissional superior sem caixa preta pesada, usando contorno forte."""
+def criar_overlay_headline(texto, largura=1080, altura=240):
+    """Gera uma headline profissional superior grande, marcante e com contorno forte."""
     img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = carregar_fonte(58)
+    font = carregar_fonte(72)  # Aumentado para ter alto impacto visual
     
-    linhas = textwrap.wrap(texto, width=22)
+    linhas = textwrap.wrap(texto, width=20)
     centro_x = largura // 2
     
     current_y = 15
@@ -84,16 +84,16 @@ def criar_overlay_headline(texto, largura=1080, altura=200):
         h = bbox[3] - bbox[1]
         line_x = centro_x - (w // 2)
         
-        # Contorno / Sombra preta grossa para destaque em qualquer fundo
+        # Contorno / Sombra preta grossa
         offset = 4
         for dx in range(-offset, offset + 1):
             for dy in range(-offset, offset + 1):
                 if dx != 0 or dy != 0:
                     draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
         
-        # Texto principal em Amarelo Viral
+        # Texto principal em Amarelo Vivo
         draw.text((line_x, current_y), linha, font=font, fill="#FACC15")
-        current_y += h + 8
+        current_y += h + 10
         
     path_img = os.path.join(CACHE_AUDIO_DIR, f"headline_{abs(hash(texto))}.png")
     img.save(path_img)
@@ -124,7 +124,7 @@ def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#
     box_x = (largura - box_w) // 2
     box_y = (altura - box_h) // 2
     
-    # Pill translúcida elegante para legibilidade absoluta
+    # Pill translúcida elegante
     draw.rounded_rectangle(
         [box_x, box_y, box_x + box_w, box_y + box_h],
         radius=16,
@@ -137,7 +137,6 @@ def criar_overlay_legenda_dinamica(texto, largura=1080, altura=280, cor_texto="#
         h = line_heights[i]
         line_x = box_x + (box_w - w) // 2
         
-        # Contorno preto
         offset = 3
         for dx in range(-offset, offset + 1):
             for dy in range(-offset, offset + 1):
@@ -184,12 +183,11 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         video_path = baixar_video_tiktok(video_url)
         base_clip = VideoFileClip(video_path)
         
-        # Gerar áudio e calcular duração exata da locução
         script_texto = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
         narracao_audio = AudioFileClip(audio_voz_path)
         
-        duracao_alvo = float(narracao_audio.duration) + 0.5  # Sincronia perfeita com o áudio gerado
+        duracao_alvo = float(narracao_audio.duration) + 0.5
         
         if base_clip.duration < duracao_alvo:
             repeats = int(duracao_alvo / base_clip.duration) + 1
@@ -210,11 +208,11 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         else:
             audio_final = narracao_audio.fx(volumex, 1.2)
 
-        # 1. Headline fixa no topo (zona segura acima da barra de pesquisa)
+        # 1. Headline no topo com tamanho dominante
         path_head = criar_overlay_headline("🚨 ACHADINHO INCRÍVEL!")
-        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 180))
+        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 150))
 
-        # 2. Legendas dinâmicas fracionadas e sincronizadas com os tempos reais da fala
+        # 2. Legendas dinâmicas sincronizadas
         partes_legenda = [
             ("Olha esse achadinho incrível para sua casa!", 0.0, 3.2, "#FFFFFF"),
             ("Prático, moderno e vai facilitar", 3.2, 6.5, "#FACC15"),
