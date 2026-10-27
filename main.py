@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V154 - FIX CORTE DE TEXTO - 2 PALAVRAS POR VEZ"""
+"""Super Robô Klebee — V157 - DEFINITIVO - SEM WORDBOUNDARY - TEMPO REAL"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -9,14 +9,14 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V154-NO-CUT"
+VERSION = "KLEBEE-V157-TEMPO-REAL"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
 
 W, H, FPS = 1080, 1920, 30
 VOICE = os.getenv("KLEBEE_TTS_VOICE", "pt-BR-AntonioNeural")
-RATE = os.getenv("KLEBEE_TTS_RATE", "+15%")
+RATE = os.getenv("KLEBEE_TTS_RATE", "+0%")
 FONT_PATHS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"]
 
 app = FastAPI(title="Super Robô Klebee", version=VERSION)
@@ -76,24 +76,35 @@ def ass_time(s: float) -> str:
 def esc_ass(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
-async def make_voice(text: str, path: Path):
+async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: float):
+    # Gera audio
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
-    audio_bytes = bytearray(); words=[]
+    audio_bytes = bytearray()
     async for chunk in comm.stream():
-        if chunk["type"] == "audio": audio_bytes.extend(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            st = float(chunk.get("offset",0))/10_000_000
-            dur = float(chunk.get("duration",0))/10_000_000
-            w = str(chunk.get("text","")).strip()
-            if w: words.append({"text":w, "start":st, "end":st+dur})
+        if chunk["type"] == "audio":
+            audio_bytes.extend(chunk["data"])
     if not audio_bytes: raise RuntimeError("TTS sem audio")
-    with path.open("wb") as f: f.write(audio_bytes)
-    if not words:
-        clean=text.split(); dur=max(3.0, len(audio_bytes)/16000.0); step=dur/max(1,len(clean))
-        words=[{"text":w,"start":i*step,"end":(i+1)*step} for i,w in enumerate(clean)]
+    with audio_path.open("wb") as f: f.write(audio_bytes)
+    
+    # FIX DEFINITIVO: Ignora WordBoundary e calcula pelo tempo real
+    # Igual 【entity-Premiere Pro¦canonical_name=Premiere Pro】 faz
+    clean_words = text.split()
+    total_words = len(clean_words)
+    if total_words == 0: raise RuntimeError("Sem palavras")
+    
+    # Reserva 0.2s de silencio no inicio e fim
+    usable_duration = max(0.5, duration - 0.4)
+    time_per_word = usable_duration / total_words
+    
+    words = []
+    for i, w in enumerate(clean_words):
+        start = 0.2 + i * time_per_word
+        end = start + time_per_word
+        words.append({"text": w, "start": start, "end": end})
+    
     return words
 
-def make_ass_fix_corte(path: Path, words, duration: float):
+def make_ass_tempo_real(path: Path, words, duration: float):
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -108,37 +119,29 @@ Style: Caption,DejaVu Sans,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    # Blocos de 2 palavras - padrao TikTok
     blocks=[]
     cur=[]
     for w in words:
         cur.append(w)
-        # FIX: maximo 2 palavras por bloco (padrao TikTok viral)
-        if len(cur)>=2 or w["text"].endswith((".", "!", "?", ",")):
-            blocks.append(cur)
-            cur=[]
+        if len(cur)>=2:
+            blocks.append(cur); cur=[]
     if cur: blocks.append(cur)
 
     events=[]
-    last_end=0.0
     for block in blocks:
         for idx, active in enumerate(block):
-            s = max(active["start"], last_end + 0.01)
+            s = active["start"]
             if idx+1 < len(block):
                 e = block[idx+1]["start"] - 0.01
             else:
-                # Ultima palavra segura ate proximo bloco
-                next_block_start = None
                 try:
                     b_idx = blocks.index(block)
-                    if b_idx+1 < len(blocks):
-                        next_block_start = blocks[b_idx+1][0]["start"]
-                except: pass
-                if next_block_start:
-                    e = next_block_start - 0.01
-                else:
-                    e = min(duration, active["end"]+0.45)
-            if e <= s: e = s + 0.30
-
+                    e = blocks[b_idx+1][0]["start"] - 0.01
+                except:
+                    e = min(duration, active["end"] + 0.1)
+            if e <= s: e = s + 0.35
+            
             parts=[]
             for j, bw in enumerate(block):
                 tok=esc_ass(bw["text"])
@@ -148,12 +151,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     parts.append(tok)
             line=" ".join(parts)
             events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line}")
-            last_end=e
 
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 def download(url: str, folder: Path) -> Path:
-    opts={"format":"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best","outtmpl":str(folder/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4","retries":2,"socket_timeout":25}
+    opts={"format":"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best","outtmpl":str(folder/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4"}
     with YoutubeDL(opts) as ydl: ydl.extract_info(url, download=True)
     cands=[p for p in folder.glob("source.*") if p.is_file() and p.stat().st_size>100_000]
     if not cands: raise RuntimeError("Sem video")
@@ -161,16 +163,17 @@ def download(url: str, folder: Path) -> Path:
 
 def probe_duration(path: Path) -> float:
     p=run([binary("ffprobe"),"-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(path)],60)
-    return float(p.stdout.strip())
+    try: return float(p.stdout.strip())
+    except: return 10.0
 
 def render(source, audio, ass, headline, output, duration):
     ass_path=str(ass.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
     hl_path=str(headline.resolve()).replace("\\","/")
-    cmd=[binary("ffmpeg"),"-y","-i",str(source),"-i",str(audio),"-i",hl_path,"-filter_complex",f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS}[bg];[bg][2:v]overlay=0:45[with_headline];[with_headline]ass='{ass_path}'[v];[0:a]volume=0.20[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a_final]","-map","[v]","-map","[a_final]","-t",f"{duration:.3f}","-threads","4","-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k","-shortest",str(output)]
+    cmd=[binary("ffmpeg"),"-y","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",hl_path,"-filter_complex",f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setpts=N/FRAME_RATE/TB[bg];[bg][2:v]overlay=0:45[with_headline];[with_headline]ass='{ass_path}'[v];[0:a]volume=0.18[a_music];[1:a]volume=1.15[a_voice];[a_music][a_voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_final]","-map","[v]","-map","[a_final]","-t",f"{duration:.3f}","-threads","4","-c:v","libx264","-preset","ultrafast","-crf","20","-c:a","aac","-b:a","192k",str(output)]
     run(cmd,400)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<h1>KLEBEE V154 - FIX CORTE</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V154</a>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V157 - TEMPO REAL</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V157</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -179,13 +182,27 @@ def health(): return {"status":"ok","version":VERSION}
 async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!")):
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True)
     try:
-        source=download(video_url,folder); audio=folder/"narration.mp3"
+        source=download(video_url,folder)
+        audio=folder/"narration.mp3"
         txt="Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
-        words=await make_voice(txt,audio); dur=min(16.0,max(10.0,probe_duration(audio)+0.2))
-        ass=folder/"captions.ass"; make_ass_fix_corte(ass,words,dur)
+        # Primeiro probe do video fonte para definir duracao final
+        audio_placeholder = folder / "temp_audio_check.mp3"
+        # Gera audio temporario para medir duracao real
+        comm = edge_tts.Communicate(txt, VOICE, rate=RATE)
+        audio_bytes = bytearray()
+        async for chunk in comm.stream():
+            if chunk["type"] == "audio": audio_bytes.extend(chunk["data"])
+        with audio_placeholder.open("wb") as f: f.write(audio_bytes)
+        audio_dur = probe_duration(audio_placeholder)
+        duration = min(16.0, max(10.5, audio_dur + 0.5))
+        
+        # Agora gera palavras com tempo real baseado na duracao
+        words = await make_voice_and_words_real_time(txt, audio, duration)
+        
+        ass=folder/"captions.ass"; make_ass_tempo_real(ass,words,duration)
         hl=folder/"headline.png"; make_headline(hl,headline)
-        out=folder/"klebee.mp4"; render(source,audio,ass,hl,out,dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v154.mp4")
+        out=folder/"klebee.mp4"; render(source,audio,ass,hl,out,duration)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v157.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
