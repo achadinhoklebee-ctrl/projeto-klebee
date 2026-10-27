@@ -1,8 +1,7 @@
 """
-VIDEO-AUTORAL V177b - FIX CORTE HEADLINE E LEGENDA COMPARTIMENTOS
-Fix: 
-1. Headline letras sobrando embaixo - centraliza e aumenta canvas
-2. Legenda COMPARTIMENTOS corta direita - auto-fit reduz fonte se palavra longa
+VIDEO-AUTORAL V177e - FINAL ESTAVEL + REGRA COMPARTIMENTOS
+Base: V177b que gerou seu video COMPARTIMENTOS e funcionou
+Fix: COMPARTIMENTOS nao estoura largura - MAX_W 980px
 """
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, random
@@ -13,7 +12,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V177d-REGRA-PALAVRAS-GRANDES"
+VERSION = "V177e-ESTAVEL-COMPARTIMENTOS"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -28,7 +27,7 @@ PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="Video Autoral V177b Fix Corte", version=VERSION)
+app = FastAPI(title="V177e", version=VERSION)
 
 def binary(n: str):
     import shutil
@@ -53,18 +52,10 @@ def font(sz):
     return ImageFont.load_default()
 
 def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=1080):
-    """
-    REGRA FORTE PARA PALAVRAS GRANDES NAO ESTOURAREM LARGURA
-    Ex: COMPARTIMENTOS (14 letras) - tem que caber em 1080px
-    Se total > W-100, reduz fonte proporcionalmente ate caber, minimo 38pt
-    """
-    MAX_W = canvas_w - 100  # deixa 50px de margem cada lado
+    """REGRA: palavras grandes tipo COMPARTIMENTOS tem que caber em 980px"""
+    MAX_W = canvas_w - 100
     cur_fsize = fsize
-    final_ws = []
-    final_total = 0
-    final_f = None
-    
-    for attempt in range(10):
+    for _ in range(8):
         f = font(cur_fsize)
         dummy = ImageDraw.Draw(Image.new("RGBA",(1,1)))
         letters = list(word.upper())
@@ -82,24 +73,12 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
                     w = cur_fsize*0.6
                 ws.append(w)
                 total += w + 6
-        # Verifica se cabe
         if total <= MAX_W or cur_fsize <= 38:
-            final_ws = ws
-            final_total = total
-            final_f = f
             break
-        # Nao cabe - reduz proporcionalmente
-        # Calcula fator de escala necessario
         scale = MAX_W / total
         cur_fsize = max(38, int(cur_fsize * scale * 0.92))
     
-    if not final_f:
-        final_f = font(cur_fsize)
-    
-    f = final_f
-    ws = final_ws
-    total = final_total
-    
+    f = font(cur_fsize)
     img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
     x = (canvas_w - total)//2
     y_center = canvas_h//2
@@ -130,7 +109,6 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
     img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
-    """FIX CORTE HEADLINE: aumenta canvas e centraliza melhor"""
     img = Image.new("RGBA", (W, 420), (0,0,0,0))
     parts = text.upper().split()
     if len(parts) <= 2:
@@ -148,7 +126,6 @@ def make_headline_2lines(path: Path, text: str):
         if len(line) > 18: fsize = 72
         if len(line) > 26: fsize = 58
         tmp = path.parent / f"hl_{idx}_{uuid.uuid4().hex[:3]}.png"
-        # FIX: canvas_h maior 200 pra nao cortar embaixo
         make_ransom_word(tmp, line, fsize=fsize, canvas_h=200, canvas_w=W)
         try:
             li = Image.open(tmp)
@@ -157,24 +134,23 @@ def make_headline_2lines(path: Path, text: str):
         bbox = li.getbbox()
         crop = li.crop(bbox) if bbox else li
         pw = crop.width + 70
-        ph = crop.height + 36  # mais altura pra nao cortar
+        ph = crop.height + 36
         if pw > W - 20: pw = W - 20
         pill = Image.new("RGBA", (pw, ph), (0,0,0,0))
         pd = ImageDraw.Draw(pill)
         pd.rounded_rectangle([6,8,pw-2,ph-4], radius=18, fill=(0,0,0,200))
         pd.rounded_rectangle([0,0,pw-8,ph-10], radius=18, fill=pill_colors[idx])
-        # Centraliza crop na pilula com margem
         px = (pw - crop.width)//2
         py = (ph - crop.height)//2 - 2
         pill.alpha_composite(crop, (px, py))
         rot = pill.rotate([-2.2, 1.9][idx], resample=Image.BICUBIC, expand=True)
         img.alpha_composite(rot, ((W-rot.width)//2, y))
-        y += rot.height - 4  # menos sobreposicao pra nao cortar
+        y += rot.height - 4
         try: tmp.unlink()
         except: pass
     img.save(path)
 
-def make_caps_video(caps: list[Path], words: list[dict], out: Path, dur: float):
+def make_caps_video(caps, words, out, dur):
     fps = 10
     total_frames = int(dur * fps) + 2
     frames_dir = out.parent / "caps_frames"
@@ -194,7 +170,7 @@ def make_caps_video(caps: list[Path], words: list[dict], out: Path, dur: float):
     run([binary("ffmpeg"),"-y","-framerate",str(fps),"-i",str(frames_dir/"f_%04d.png"),"-c:v","png","-pix_fmt","rgba","-t",f"{dur:.2f}",str(out)],600)
     shutil.rmtree(frames_dir, ignore_errors=True)
 
-async def get_words(text: str, audio_path: Path):
+async def get_words(text, audio_path):
     comm=edge_tts.Communicate(text, VOICE, rate=RATE)
     audio_bytes=bytearray(); raw=[]
     async for chunk in comm.stream():
@@ -209,7 +185,7 @@ async def get_words(text: str, audio_path: Path):
         raise RuntimeError("TTS sem audio")
     with audio_path.open("wb") as f:
         f.write(audio_bytes)
-    def probe(p: Path):
+    def probe(p):
         r=run([binary("ffprobe"),"-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(p)],60)
         try: return float(r.stdout.strip())
         except: return 10.0
@@ -224,7 +200,7 @@ async def get_words(text: str, audio_path: Path):
         if w["end"]-w["start"]<0.28: w["end"]=w["start"]+0.28
     return words, ad
 
-def download(url: str, folder: Path):
+def download(url, folder):
     opts={"format":"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best","outtmpl":str(folder/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4"}
     with YoutubeDL(opts) as ydl:
         ydl.extract_info(url, download=True)
@@ -246,11 +222,11 @@ def render_final_fix(source, audio, headline, caps_video, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"<h1>{VERSION}</h1><p>Fix corte headline + legenda COMPARTIMENTOS | 2 linhas | 58%</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
+    return f"<h1>{VERSION}</h1><p>2 linhas | 58% | Fix COMPARTIMENTOS MAX_W 980px | Espaco 40px</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
-    return {"version":VERSION,"fix":"corte headline e COMPARTIMENTOS","caption_y":CAPTION_Y}
+    return {"version":VERSION,"caption_y":CAPTION_Y,"fix":"COMPARTIMENTOS MAX_W 980px"}
 
 @app.get("/render")
 async def render():
@@ -272,13 +248,15 @@ async def render():
         make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
-        out=folder/"final_v177b.mp4"
+        out=folder/"final_v177e.mp4"
         render_final_fix(src, audio_final, hl, caps_video, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v177b_fix_corte_2linhas_58.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v177e_estavel_compartimentos.mp4")
     except Exception as e:
         print(traceback.format_exc())
-        raise HTTPException(500, f"Erro V177b: {e}")
+        raise HTTPException(500, f"Erro V177e: {e}")
 
 if __name__=="__main__":
     import uvicorn, os
     port=int(os.getenv("PORT","8000"))
+    print(f"{VERSION} CAPTION_Y={CAPTION_Y}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
