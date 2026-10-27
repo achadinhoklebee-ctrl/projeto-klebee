@@ -4,3 +4,5 @@ edge-tts
 Pillow
 moviepy
 numpy
+yt-dlp
+requests
