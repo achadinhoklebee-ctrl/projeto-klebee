@@ -15,8 +15,8 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import volumex, audio_fadein, audio_fadeout
 
-APP_VERSION = "KLEBEE-STABLE-PIL-2026-10-27-02"
-app = FastAPI(title="Klebee Cloud Engine - Stable PIL", version=APP_VERSION)
+APP_VERSION = "KLEBEE-STABLE-PIL-FIX-2026-10-27-03"
+app = FastAPI(title="Klebee Cloud Engine - Stable PIL Fixed", version=APP_VERSION)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -27,10 +27,10 @@ os.makedirs(CACHE_AUDIO_DIR, exist_ok=True)
 WIDTH, HEIGHT = 1080, 1920
 VOICE = "pt-BR-AntonioNeural"
 VOICE_RATE = "+15%"
-HEADLINE_Y = 170
-CAPTION_Y = 1270
-CAPTION_H = 300
-SIDE_MARGIN = 90
+HEADLINE_Y = 180
+CAPTION_Y = 1350
+CAPTION_H = 260
+SIDE_MARGIN = 120  # Aumentado para dar margem segura e não cortar nas pontas
 
 
 def baixar_video_tiktok(url_tiktok: str) -> str:
@@ -147,23 +147,23 @@ def criar_overlay_headline(texto: str, largura=WIDTH, altura=250) -> str:
     texto = limpar_texto_visual(texto)
     img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    max_width = largura - 2 * SIDE_MARGIN
-    font_size = 76
-    while font_size >= 42:
+    max_width = largura - (2 * SIDE_MARGIN)
+    font_size = 72
+    while font_size >= 40:
         font = carregar_fonte(font_size)
         linhas = quebrar_por_pixels(draw, texto.split(), font, max_width)
         if len(linhas) <= 2 and all(medir(draw, line, font)[0] <= max_width for line in linhas):
             break
         font_size -= 2
     line_heights = [medir(draw, line, font)[1] for line in linhas]
-    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 7
+    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 6
     y = max(5, (altura - total_h) // 2)
     for linha, h in zip(linhas, line_heights):
         w, _ = medir(draw, linha, font)
         x = (largura - w) // 2
         draw.text((x, y), linha, font=font, fill="#FFE500",
                   stroke_width=5, stroke_fill="#111111")
-        y += h + 7
+        y += h + 6
     path = os.path.join(CACHE_AUDIO_DIR, "headline_" +
                         hashlib.md5(texto.encode("utf-8")).hexdigest() + ".png")
     img.save(path)
@@ -178,9 +178,10 @@ def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
         palavras = [" "]
     img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    max_width = largura - 2 * SIDE_MARGIN - 42
-    font_size = 54
-    while font_size >= 34:
+    # Margem lateral mais segura para evitar que o texto estoure as pontas
+    max_width = largura - (2 * SIDE_MARGIN) - 30
+    font_size = 48  # Reduzido levemente para caber perfeitamente sem cortar
+    while font_size >= 30:
         font = carregar_fonte(font_size)
         linhas = []
         linha_indices = []
@@ -203,18 +204,18 @@ def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
             break
         font_size -= 2
 
-    pad_x, pad_y, gap = 28, 17, 9
-    box_w = min(largura - 2 * SIDE_MARGIN, max(widths, default=100) + 2 * pad_x)
-    box_h = sum(heights) + max(0, len(heights)-1) * gap + 2 * pad_y
-    bx, by = (largura-box_w)//2, (altura-box_h)//2
-    draw.rounded_rectangle((bx, by, bx+box_w, by+box_h), radius=18,
-                           fill=(0, 0, 0, 185))
+    pad_x, pad_y, gap = 24, 14, 8
+    box_w = min(largura - (2 * SIDE_MARGIN), max(widths, default=100) + (2 * pad_x))
+    box_h = sum(heights) + max(0, len(heights)-1) * gap + (2 * pad_y)
+    bx, by = (largura - box_w) // 2, (altura - box_h) // 2
+    draw.rounded_rectangle((bx, by, bx + box_w, by + box_h), radius=16,
+                           fill=(0, 0, 0, 200))
     y = by + pad_y
     for line, ids, h in zip(linhas, linha_indices, heights):
         widths_words = [medir(draw, word, font)[0] for word in line]
         spaces = medir(draw, " ", font)[0]
-        line_w = sum(widths_words) + spaces * max(0, len(line)-1)
-        x = (largura-line_w)//2
+        line_w = sum(widths_words) + spaces * max(0, len(line) - 1)
+        x = (largura - line_w) // 2
         for word, idx, ww in zip(line, ids, widths_words):
             color = "#FFE500" if idx == indice_ativo else "#FFFFFF"
             draw.text((x, y), word, font=font, fill=color,
@@ -230,7 +231,7 @@ def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
 
 def montar_clips_legenda(words, duracao):
     clips = []
-    group_size = 4
+    group_size = 3  # Reduzido para 3 palavras por bloco para evitar frases longas na tela
     for group_start in range(0, len(words), group_size):
         group = words[group_start:group_start + group_size]
         for local_idx, word in enumerate(group):
@@ -244,7 +245,7 @@ def montar_clips_legenda(words, duracao):
                 [w["text"] for w in group], local_idx
             )
             clips.append(
-                ImageClip(path).set_start(start).set_duration(max(0.06, end-start))
+                ImageClip(path).set_start(start).set_duration(max(0.06, end - start))
                 .set_pos(("center", CAPTION_Y))
             )
     return clips
@@ -287,7 +288,7 @@ def health():
 def version():
     return {
         "app_version": APP_VERSION,
-        "caption_mode": "PIL-word-boundary-highlight",
+        "caption_mode": "PIL-safe-margins-fixed",
     }
 
 
@@ -333,7 +334,7 @@ def render(video_url: str = Query(
                 music = concatenate_audioclips([source_audio] * count).subclip(0, duracao_alvo)
             else:
                 music = source_audio.subclip(0, duracao_alvo)
-            music = music.fx(volumex, 0.12).fx(audio_fadein, 0.25).fx(audio_fadeout, min(0.6, duracao_alvo/3))
+            music = music.fx(volumex, 0.12).fx(audio_fadein, 0.25).fx(audio_fadeout, min(0.6, duracao_alvo / 3))
             audio_final = CompositeAudioClip([narracao_audio.fx(volumex, 1.0), music]).set_duration(duracao_alvo)
             clips_to_close.extend([music, audio_final])
         else:
@@ -350,7 +351,7 @@ def render(video_url: str = Query(
                                          size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
         clips_to_close.append(video_final)
 
-        output_name = f"klebee_stable_{os.urandom(4).hex()}.mp4"
+        output_name = f"klebee_stable_fix_{os.urandom(4).hex()}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_name)
         
         video_final.write_videofile(
