@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V169 - FIX THREADS 60 -> 2 - DEFINITIVO - NAO DA MAIS -9"""
+"""Super Robô Klebee — V170 - LARANJA SHOPEE + HEADLINE PRINT 4 + FIX ATRASO FINAL - DEFINITIVO"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, time
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V169-THREADS-FIX"
+VERSION = "KLEBEE-V170-SHOPEE-ORANGE"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -16,6 +16,7 @@ JOBS.mkdir(parents=True, exist_ok=True)
 W, H = 1080, 1920
 VOICE = "pt-BR-FranciscaNeural"
 RATE = "+10%"
+SHOPEE_ORANGE = "#FF6B00"  # Laranja padrão Shopee #FF6A00 / #EE4D2D
 FONTS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
@@ -32,7 +33,6 @@ def binary(n: str) -> str:
 def run(args, timeout=400):
     p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
-        # Mostra só últimas 2000 chars pra não quebrar JSON
         err = (p.stderr or p.stdout)[-2000:]
         raise RuntimeError(f"Erro {p.returncode}: {err}")
     return p
@@ -46,16 +46,17 @@ def font(sz: int):
                 pass
     return ImageFont.load_default()
 
-def make_headline_print4(path: Path, text: str):
-    img = Image.new("RGBA", (W, 650), (0,0,0,0))
+def make_headline_shopee_print4(path: Path, text: str):
+    # FOTO 4 + COR SHOPEE: TODO MUNDO odeia NARRAR VIDEO - 140PT LARANJA
+    img = Image.new("RGBA", (W, 700), (0,0,0,0))
     d = ImageDraw.Draw(img)
-    f = font(135)
+    f = font(140)
     words = text.upper().split()
     lines, cur = [], ""
     for w in words:
         cand = f"{cur} {w}".strip()
-        bb = d.textbbox((0,0), cand, font=f, stroke_width=18)
-        if bb[2]-bb[0] <= W-80:
+        bb = d.textbbox((0,0), cand, font=f, stroke_width=22)
+        if bb[2]-bb[0] <= W-60:
             cur = cand
         else:
             if cur:
@@ -64,13 +65,15 @@ def make_headline_print4(path: Path, text: str):
     if cur:
         lines.append(cur)
     lines = lines[:3]
-    y = 15
+    y = 20
     for line in lines:
-        bb = d.textbbox((0,0), line, font=f, stroke_width=18)
+        bb = d.textbbox((0,0), line, font=f, stroke_width=22)
         x = (W - (bb[2]-bb[0])) // 2
-        d.text((x+5,y+5), line, font=f, fill="black", stroke_width=18, stroke_fill="black")
-        d.text((x,y), line, font=f, fill="#FFE500", stroke_width=18, stroke_fill="black")
-        y += bb[3]-bb[1]+20
+        # Sombra dupla + contorno 22px + laranja Shopee - estilo Hormozi agressivo
+        d.text((x+6,y+6), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
+        d.text((x+3,y+3), line, font=f, fill="black", stroke_width=22, stroke_fill="black")
+        d.text((x,y), line, font=f, fill=SHOPEE_ORANGE, stroke_width=22, stroke_fill="black")
+        y += bb[3]-bb[1]+22
     img.save(path)
 
 def ass_time(s: float) -> str:
@@ -81,8 +84,9 @@ def ass_time(s: float) -> str:
 def esc(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
-def make_ass_70pct(path: Path, words, duration: float):
-    header = """[Script Info]
+def make_ass_shopee_70pct(path: Path, words, duration: float):
+    # LARANJA SHOPEE #FF6B00 + 70% altura (615)
+    header = f"""[Script Info]
 PlayResX: 1080
 PlayResY: 1920
 WrapStyle: 0
@@ -90,7 +94,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: C,DejaVu Sans,96,&H0000E5FF,&H0000E5FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,12,2,2,80,80,615,1
+Style: C,DejaVu Sans,96,&H00006BFF,&H00006BFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,12,2,2,80,80,615,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -119,8 +123,52 @@ def probe(p: Path) -> float:
     except:
         return 10.0
 
+async def get_words_with_real_timing(text: str, audio_path: Path, duration: float):
+    # Pega WordBoundary real com pausas
+    comm = edge_tts.Communicate(text, VOICE, rate=RATE)
+    audio_bytes = bytearray()
+    raw_words = []
+    async for chunk in comm.stream():
+        if chunk["type"] == "audio":
+            audio_bytes.extend(chunk["data"])
+        elif chunk["type"] == "WordBoundary":
+            st = float(chunk.get("offset",0))/10_000_000
+            dur = float(chunk.get("duration",0))/10_000_000
+            w = str(chunk.get("text","")).strip()
+            if w:
+                raw_words.append({"text": w, "start": st, "raw_end": st+dur})
+    
+    if not audio_bytes:
+        raise RuntimeError("TTS sem audio")
+    with audio_path.open("wb") as f:
+        f.write(audio_bytes)
+    
+    # Se não veio WordBoundary, fallback igual
+    if not raw_words:
+        clean = text.split()
+        tpw = duration / max(1, len(clean))
+        return [{"text": w, "start": i*tpw, "end": (i+1)*tpw} for i,w in enumerate(clean)]
+    
+    # FIX ATRASO: Estica proporcionalmente para duração total
+    # Ex: WordBoundary vai até 4s mas áudio tem 9s -> fator 2.25
+    last_raw = max(w["raw_end"] for w in raw_words)
+    audio_dur = probe(audio_path)
+    # Queremos que última palavra termine 0.2s antes do áudio acabar
+    target_end = max(0.5, audio_dur - 0.25)
+    scale = target_end / max(0.1, last_raw)
+    
+    words = []
+    for w in raw_words:
+        s = w["start"] * scale + 0.15  # 0.15s offset inicial
+        e = w["raw_end"] * scale + 0.15
+        # Garante mínimo 0.35s por palavra para leitura
+        if e - s < 0.35:
+            e = s + 0.35
+        words.append({"text": w["text"], "start": s, "end": e})
+    
+    return words
+
 def render_definitivo(source, audio, headline, ass_p, out, dur):
-    # FIX THREADS 60 -> 2 - IGUAL V157 QUE FUNCIONAVA
     ass_path = str(ass_p.resolve()).replace(":", "\\:").replace("'", "")
     cmd = [
         binary("ffmpeg"),"-y",
@@ -149,7 +197,7 @@ def clean():
 
 @app.get("/")
 def home():
-    return HTMLResponse("<h1>V169 - FIX THREADS - DEFINITIVO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V169</a>")
+    return HTMLResponse("<h1>V170 - SHOPEE LARANJA + FIX ATRASO</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V170</a>")
 
 @app.get("/health")
 def health():
@@ -164,34 +212,31 @@ async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_colle
         audio = folder/"narr.mp3"
         txt = "Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
         tmp = folder/"tmp.mp3"
-        comm = edge_tts.Communicate(txt, VOICE, rate=RATE)
-        data = bytearray()
-        async for c in comm.stream():
-            if c["type"]=="audio":
-                data.extend(c["data"])
-        tmp.write_bytes(data)
+        # Gera com timing real e esticado
+        words = await get_words_with_real_timing(txt, tmp, 10.0)
         ad = probe(tmp)
         dur = min(16.0, max(10.5, ad+0.3))
-        usable = max(0.5, ad-0.35)
-        words_txt = txt.split()
-        tpw = usable / len(words_txt)
-        comm2 = edge_tts.Communicate(txt, VOICE, rate=RATE)
-        data2 = bytearray()
-        async for c in comm2.stream():
-            if c["type"]=="audio":
-                data2.extend(c["data"])
-        audio.write_bytes(data2)
-        words = []
-        for i, w in enumerate(words_txt):
-            s = 0.15 + i*tpw
-            words.append({"text": w, "start": s, "end": s+tpw})
+        # Re-gera palavras com duração final correta
+        # Copia tmp para audio
+        import shutil
+        shutil.copy(tmp, audio)
+        # Recalcula escala final
+        last_raw = max(w["end"] for w in words)
+        target = max(0.5, ad - 0.25)
+        scale = target / max(0.1, last_raw-0.15)
+        final_words = []
+        for w in words:
+            s = (w["start"]-0.15)*scale + 0.15
+            e = (w["end"]-0.15)*scale + 0.15
+            final_words.append({"text": w["text"], "start": s, "end": e})
+        
         ass = folder/"cap.ass"
-        make_ass_70pct(ass, words, dur)
+        make_ass_70pct(ass, final_words, dur)
         hl = folder/"head.png"
         make_headline_print4(hl, headline)
         out = folder/"final.mp4"
         render_definitivo(src, audio, hl, ass, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v169.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v170.mp4")
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
@@ -200,3 +245,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
