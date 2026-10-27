@@ -1,24 +1,21 @@
 import os
+import re
 import hashlib
 import asyncio
 import subprocess
-import textwrap
-import numpy as np
+from pathlib import Path
+
+import edge_tts
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, FileResponse
-import edge_tts
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import (
-    VideoFileClip,
-    AudioFileClip,
-    CompositeVideoClip,
-    ImageClip,
-    CompositeAudioClip,
-    concatenate_videoclips
+    VideoFileClip, AudioFileClip, CompositeVideoClip, ImageClip,
+    CompositeAudioClip, concatenate_videoclips, concatenate_audioclips
 )
-from moviepy.audio.fx.all import volumex
+from moviepy.audio.fx.all import volumex, audio_fadein, audio_fadeout
 
-app = FastAPI(title="Klebee Cloud Engine - V144 Stable")
+app = FastAPI(title="Klebee Cloud Engine - Dynamic Captions")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -26,225 +23,329 @@ CACHE_AUDIO_DIR = os.path.join(BASE_DIR, "cache_audio")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CACHE_AUDIO_DIR, exist_ok=True)
 
-def baixar_video_tiktok(url_tiktok):
-    hash_url = hashlib.md5(url_tiktok.encode()).hexdigest()
-    output_path = os.path.join(CACHE_AUDIO_DIR, f"base_{hash_url}.mp4")
-    
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
-        return output_path
+WIDTH, HEIGHT = 1080, 1920
+VOICE = "pt-BR-AntonioNeural"
+VOICE_RATE = "+15%"
+HEADLINE_Y = 170
+CAPTION_Y = 1270
+CAPTION_H = 300
+SIDE_MARGIN = 90
 
-    cmd = [
-        "yt-dlp",
-        "-f", "b",
-        "-o", output_path,
-        url_tiktok
-    ]
-    subprocess.run(cmd, check=True)
+
+def baixar_video_tiktok(url_tiktok: str) -> str:
+    if not url_tiktok.startswith(("https://www.tiktok.com/", "https://vm.tiktok.com/",
+                                  "https://vt.tiktok.com/")):
+        raise ValueError("Informe uma URL HTTPS válida do TikTok.")
+    key = hashlib.md5(url_tiktok.encode("utf-8")).hexdigest()
+    output_path = os.path.join(CACHE_AUDIO_DIR, f"base_{key}.mp4")
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 100_000:
+        return output_path
+    temp_path = output_path + ".part"
+    cmd = ["yt-dlp", "--no-playlist", "-f", "bv*+ba/b", "--merge-output-format", "mp4",
+           "-o", temp_path, url_tiktok]
+    subprocess.run(cmd, check=True, timeout=180)
+    candidates = [temp_path, temp_path + ".mp4"]
+    found = next((x for x in candidates if os.path.exists(x) and os.path.getsize(x) > 100_000), None)
+    if not found:
+        matches = sorted(Path(CACHE_AUDIO_DIR).glob(Path(temp_path).name + "*"),
+                         key=lambda x: x.stat().st_mtime, reverse=True)
+        found = str(matches[0]) if matches else None
+    if not found:
+        raise RuntimeError("O download terminou, mas o MP4 de origem não foi encontrado.")
+    if found != output_path:
+        os.replace(found, output_path)
     return output_path
 
-async def gerar_audio_narracao(texto):
-    hash_txt = hashlib.md5(texto.encode()).hexdigest()
-    path_audio = os.path.join(CACHE_AUDIO_DIR, f"{hash_txt}.mp3")
-    
-    if os.path.exists(path_audio) and os.path.getsize(path_audio) > 100:
-        return path_audio
 
-    communicate = edge_tts.Communicate(texto, "pt-BR-AntonioNeural", rate="+15%")
-    await communicate.save(path_audio)
-    return path_audio
+async def gerar_audio_com_timestamps(texto: str):
+    key = hashlib.sha256((texto + VOICE + VOICE_RATE).encode("utf-8")).hexdigest()
+    audio_path = os.path.join(CACHE_AUDIO_DIR, f"voice_{key}.mp3")
+    meta_path = os.path.join(CACHE_AUDIO_DIR, f"voice_{key}.words")
+    words = []
 
-def carregar_fonte(tamanho):
-    font_paths = [
+    if os.path.exists(audio_path) and os.path.getsize(audio_path) > 100 and os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    start, end, word = line.rstrip("\n").split("\t", 2)
+                    words.append({"start": float(start), "end": float(end), "text": word})
+            if words:
+                return audio_path, words
+        except Exception:
+            words = []
+
+    communicate = edge_tts.Communicate(texto, VOICE, rate=VOICE_RATE, boundary="WordBoundary")
+    audio_bytes = bytearray()
+    async for event in communicate.stream():
+        if event["type"] == "audio":
+            audio_bytes.extend(event["data"])
+        elif event["type"] == "WordBoundary":
+            start = float(event["offset"]) / 10_000_000
+            duration = float(event["duration"]) / 10_000_000
+            token = str(event["text"]).strip()
+            if token:
+                words.append({"start": max(0.0, start),
+                              "end": max(start + 0.04, start + duration),
+                              "text": token})
+    if not audio_bytes:
+        raise RuntimeError("O Edge TTS não retornou áudio.")
+    with open(audio_path, "wb") as f:
+        f.write(audio_bytes)
+    if words:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            for w in words:
+                f.write(f'{w["start"]:.6f}\t{w["end"]:.6f}\t{w["text"]}\n')
+    else:
+        raise RuntimeError("O Edge TTS não retornou eventos WordBoundary.")
+    return audio_path, words
+
+
+def carregar_fonte(tamanho: int):
+    paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-        "arial.ttf",
-        "arialbd.ttf"
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
-    for fp in font_paths:
-        if os.path.exists(fp):
+    for path in paths:
+        if os.path.exists(path):
             try:
-                return ImageFont.truetype(fp, tamanho)
-            except:
+                return ImageFont.truetype(path, tamanho)
+            except OSError:
                 pass
     return ImageFont.load_default()
 
-def criar_overlay_headline(texto, largura=1080, altura=200):
-    img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    font = carregar_fonte(65)
-    
-    linhas = textwrap.wrap(texto, width=22)
-    centro_x = largura // 2
-    
-    current_y = 10
-    for linha in linhas:
-        bbox = font.getbbox(linha)
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        line_x = centro_x - (w // 2)
-        
-        offset = 4
-        for dx in range(-offset, offset + 1):
-            for dy in range(-offset, offset + 1):
-                if dx != 0 or dy != 0:
-                    draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
-        
-        draw.text((line_x, current_y), linha, font=font, fill="#FACC15")
-        current_y += h + 6
-        
-    path_img = os.path.join(CACHE_AUDIO_DIR, f"headline_{abs(hash(texto))}.png")
-    img.save(path_img)
-    return path_img
 
-def criar_overlay_legenda_dinamica(texto, largura=1080, altura=240, cor_texto="#FFFFFF"):
-    linhas = textwrap.wrap(texto, width=26)
-    img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
+def limpar_texto_visual(texto: str) -> str:
+    texto = re.sub(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF]", "", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
+
+
+def medir(draw, texto, fonte):
+    box = draw.textbbox((0, 0), texto, font=fonte, stroke_width=0)
+    return box[2] - box[0], box[3] - box[1]
+
+
+def quebrar_por_pixels(draw, palavras, fonte, max_width):
+    linhas, atual = [], ""
+    for palavra in palavras:
+        teste = palavra if not atual else atual + " " + palavra
+        largura, _ = medir(draw, teste, fonte)
+        if largura <= max_width or not atual:
+            atual = teste
+        else:
+            linhas.append(atual)
+            atual = palavra
+    if atual:
+        linhas.append(atual)
+    return linhas
+
+
+def criar_overlay_headline(texto: str, largura=WIDTH, altura=250) -> str:
+    texto = limpar_texto_visual(texto)
+    img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = carregar_fonte(48)
-    
-    pad_x = 30
-    pad_y = 15
-    
-    line_widths = []
-    line_heights = []
-    for linha in linhas:
-        bbox = font.getbbox(linha)
-        line_widths.append(bbox[2] - bbox[0])
-        line_heights.append(bbox[3] - bbox[1])
-    
-    max_w = max(line_widths) if line_widths else 100
-    total_h = sum(line_heights) + (len(linhas) - 1) * 8
-    
-    box_w = max_w + (pad_x * 2)
-    box_h = total_h + (pad_y * 2)
-    box_x = (largura - box_w) // 2
-    box_y = (altura - box_h) // 2
-    
-    draw.rounded_rectangle(
-        [box_x, box_y, box_x + box_w, box_y + box_h],
-        radius=14,
-        fill=(0, 0, 0, 210)
-    )
-    
-    current_y = box_y + pad_y
-    for i, linha in enumerate(linhas):
-        w = line_widths[i]
-        h = line_heights[i]
-        line_x = box_x + (box_w - w) // 2
-        
-        offset = 3
-        for dx in range(-offset, offset + 1):
-            for dy in range(-offset, offset + 1):
-                if dx != 0 or dy != 0:
-                    draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
-        
-        draw.text((line_x, current_y), linha, font=font, fill=cor_texto)
-        current_y += h + 8
-        
-    path_img = os.path.join(CACHE_AUDIO_DIR, f"leg_{abs(hash(texto))}.png")
-    img.save(path_img)
-    return path_img
+    max_width = largura - 2 * SIDE_MARGIN
+    font_size = 76
+    while font_size >= 42:
+        font = carregar_fonte(font_size)
+        linhas = quebrar_por_pixels(draw, texto.split(), font, max_width)
+        if len(linhas) <= 2 and all(medir(draw, line, font)[0] <= max_width for line in linhas):
+            break
+        font_size -= 2
+    line_heights = [medir(draw, line, font)[1] for line in linhas]
+    total_h = sum(line_heights) + max(0, len(linhas) - 1) * 7
+    y = max(5, (altura - total_h) // 2)
+    for linha, h in zip(linhas, line_heights):
+        w, _ = medir(draw, linha, font)
+        x = (largura - w) // 2
+        draw.text((x, y), linha, font=font, fill="#FFE500",
+                  stroke_width=5, stroke_fill="#111111")
+        y += h + 7
+    path = os.path.join(CACHE_AUDIO_DIR, "headline_" +
+                        hashlib.md5(texto.encode("utf-8")).hexdigest() + ".png")
+    img.save(path)
+    return path
+
+
+def criar_overlay_legenda_palavra(palavras_grupo, indice_ativo, largura=WIDTH,
+                                    altura=CAPTION_H) -> str:
+    palavras = [limpar_texto_visual(w) for w in palavras_grupo]
+    palavras = [w for w in palavras if w]
+    if not palavras:
+        palavras = [" "]
+    img = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    max_width = largura - 2 * SIDE_MARGIN - 42
+    font_size = 54
+    while font_size >= 34:
+        font = carregar_fonte(font_size)
+        linhas = []
+        linha_indices = []
+        current, current_idx = [], []
+        for idx, palavra in enumerate(palavras):
+            teste = " ".join(current + [palavra])
+            if current and medir(draw, teste, font)[0] > max_width:
+                linhas.append(current)
+                linha_indices.append(current_idx)
+                current, current_idx = [palavra], [idx]
+            else:
+                current.append(palavra)
+                current_idx.append(idx)
+        if current:
+            linhas.append(current)
+            linha_indices.append(current_idx)
+        widths = [medir(draw, " ".join(line), font)[0] for line in linhas]
+        heights = [medir(draw, " ".join(line), font)[1] for line in linhas]
+        if max(widths, default=0) <= max_width and len(linhas) <= 3:
+            break
+        font_size -= 2
+
+    pad_x, pad_y, gap = 28, 17, 9
+    box_w = min(largura - 2 * SIDE_MARGIN, max(widths, default=100) + 2 * pad_x)
+    box_h = sum(heights) + max(0, len(heights)-1) * gap + 2 * pad_y
+    bx, by = (largura-box_w)//2, (altura-box_h)//2
+    draw.rounded_rectangle((bx, by, bx+box_w, by+box_h), radius=18,
+                           fill=(0, 0, 0, 185))
+    y = by + pad_y
+    for line, ids, h in zip(linhas, linha_indices, heights):
+        widths_words = [medir(draw, word, font)[0] for word in line]
+        spaces = medir(draw, " ", font)[0]
+        line_w = sum(widths_words) + spaces * max(0, len(line)-1)
+        x = (largura-line_w)//2
+        for word, idx, ww in zip(line, ids, widths_words):
+            color = "#FFE500" if idx == indice_ativo else "#FFFFFF"
+            draw.text((x, y), word, font=font, fill=color,
+                      stroke_width=2, stroke_fill="#111111")
+            x += ww + spaces
+        y += h + gap
+
+    key = hashlib.md5(( "|".join(palavras) + f"_{indice_ativo}_{font_size}" ).encode("utf-8")).hexdigest()
+    path = os.path.join(CACHE_AUDIO_DIR, f"caption_{key}.png")
+    img.save(path)
+    return path
+
+
+def montar_clips_legenda(words, duracao):
+    clips = []
+    group_size = 4
+    for group_start in range(0, len(words), group_size):
+        group = words[group_start:group_start + group_size]
+        for local_idx, word in enumerate(group):
+            start = max(0.0, float(word["start"]))
+            end = min(float(duracao), max(start + 0.06, float(word["end"])))
+            if start >= duracao or end <= start:
+                continue
+            if local_idx + 1 < len(group):
+                end = min(duracao, max(end, float(group[local_idx + 1]["start"])))
+            path = criar_overlay_legenda_palavra(
+                [w["text"] for w in group], local_idx
+            )
+            clips.append(
+                ImageClip(path).set_start(start).set_duration(max(0.06, end-start))
+                .set_pos(("center", CAPTION_Y))
+            )
+    return clips
+
 
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head>
-        <meta charset="UTF-8">
-        <title>Super Robô Klebee - Cloud Engine V144</title>
-        <style>
-            body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; padding-top: 60px; }
-            .card { background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 650px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-            h1 { color: #38bdf8; font-size: 32px; margin-bottom: 10px; }
-            p { color: #94a3b8; font-size: 18px; margin-bottom: 30px; }
-            .btn { background: #22c55e; color: white; padding: 18px 36px; font-size: 20px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block; transition: 0.3s; }
-            .btn:hover { background: #16a34a; transform: scale(1.03); }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>🚀 Super Robô Klebee V144</h1>
-            <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
-            <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
-        </div>
-    </body>
-    </html>
+    <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Super Robô Klebee</title>
+    <style>
+    body{background:#0f172a;color:#f8fafc;font-family:Arial,sans-serif;text-align:center;padding:50px 15px}
+    .card{background:#1e293b;padding:32px;border-radius:16px;display:inline-block;max-width:650px}
+    h1{color:#38bdf8}p{color:#cbd5e1}.btn{background:#22c55e;color:white;padding:16px 24px;
+    text-decoration:none;border-radius:10px;font-weight:bold;display:inline-block}
+    </style></head><body><div class="card"><h1>Super Robô Klebee</h1>
+    <p>Gerador de vídeos verticais com narração e legendas dinâmicas.</p>
+    <p>Use /render?video_url=URL_DO_TIKTOK para renderizar um vídeo.</p></div></body></html>
     """
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/render")
-def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461")):
+def render(video_url: str = Query(
+    "https://www.tiktok.com/@carey_collections/video/7688751450901597461"
+), headline: str = Query("ACHADINHO INCRÍVEL!")):
+    clips_to_close = []
     try:
         video_path = baixar_video_tiktok(video_url)
         base_clip = VideoFileClip(video_path)
-        
-        script_texto = "Olha esse achadinho incrível para sua casa! Prático, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
-        audio_voz_path = asyncio.run(gerar_audio_narracao(script_texto))
+        clips_to_close.append(base_clip)
+
+        script_texto = (
+            "Olha esse achadinho incrível para sua casa! Prático, moderno e vai "
+            "facilitar demais a sua rotina. Corre no link da bio e garanta o seu "
+            "antes que esgote!"
+        )
+        audio_voz_path, word_events = asyncio.run(gerar_audio_com_timestamps(script_texto))
         narracao_audio = AudioFileClip(audio_voz_path)
-        
-        duracao_alvo = float(narracao_audio.duration) + 0.3
-        
+        clips_to_close.append(narracao_audio)
+        duracao_alvo = float(narracao_audio.duration)
+
         if base_clip.duration < duracao_alvo:
-            repeats = int(duracao_alvo / base_clip.duration) + 1
-            video_base = concatenate_videoclips([base_clip] * repeats).subclip(0, duracao_alvo)
+            repeats = int(duracao_alvo / max(base_clip.duration, 0.1)) + 1
+            video_base = concatenate_videoclips([base_clip] * repeats, method="compose").subclip(0, duracao_alvo)
         else:
             video_base = base_clip.subclip(0, duracao_alvo)
+        clips_to_close.append(video_base)
 
-        video_base = video_base.resize(width=1080)
-        if video_base.h > 1920:
-            y_c = video_base.h / 2
-            video_base = video_base.crop(y1=y_c-960, y2=y_c+960, x1=0, x2=1080)
-        elif video_base.h < 1920:
-            video_base = video_base.resize((1080, 1920))
-
-        if base_clip.audio is not None:
-            trilha_fundo = base_clip.audio.subclip(0, duracao_alvo).fx(volumex, 0.12)
-            audio_final = CompositeAudioClip([narracao_audio.fx(volumex, 1.2), trilha_fundo])
-        else:
-            audio_final = narracao_audio.fx(volumex, 1.2)
-
-        path_head = criar_overlay_headline("🚨 ACHADINHO INCRÍVEL!")
-        headline_clip = ImageClip(path_head).set_start(0.0).set_duration(duracao_alvo).set_pos(('center', 140))
-
-        partes_legenda = [
-            ("Olha esse achadinho incrível para sua casa!", 0.0, 3.2, "#FFFFFF"),
-            ("Prático, moderno e vai facilitar", 3.2, 6.5, "#FACC15"),
-            ("demais a sua rotina!", 6.5, 8.8, "#FFFFFF"),
-            ("Corre no link da bio e garanta o seu", 8.8, 12.0, "#FACC15"),
-            ("antes que esgote!", 12.0, duracao_alvo, "#22C55E")
-        ]
-
-        clips_legendas = [headline_clip]
-        for texto_bloco, inicio, fim, cor in partes_legenda:
-            if inicio >= duracao_alvo:
-                continue
-            dur = min(fim, duracao_alvo) - inicio
-            if dur <= 0:
-                continue
-            path_leg = criar_overlay_legenda_dinamica(texto_bloco, cor_texto=cor)
-            leg_clip = ImageClip(path_leg).set_start(inicio).set_duration(dur).set_pos(('center', 1400))
-            clips_legendas.append(leg_clip)
-
-        video_final = CompositeVideoClip([video_base] + clips_legendas, size=(1080, 1920))
-        video_final = video_final.set_duration(duracao_alvo).set_audio(audio_final)
-
-        output_name = f"klebee_v144_cloud_{int(os.urandom(3).hex(), 16)}.mp4"
-        output_path = os.path.join(OUTPUT_DIR, output_name)
-
-        video_final.write_videofile(
-            output_path,
-            fps=24,
-            codec="libx264",
-            audio_codec="aac",
-            preset="ultrafast",  # Renderização super rápida para evitar timeout no Railway
-            threads=2,
-            logger=None
+        video_base = video_base.resize(height=HEIGHT) if video_base.h / video_base.w < HEIGHT / WIDTH else video_base.resize(width=WIDTH)
+        if video_base.w < WIDTH or video_base.h < HEIGHT:
+            video_base = video_base.resize(height=HEIGHT)
+        video_base = video_base.crop(
+            x_center=video_base.w / 2, y_center=video_base.h / 2,
+            width=WIDTH, height=HEIGHT
         )
 
-        return FileResponse(output_path, media_type="video/mp4", filename=output_name)
+        if base_clip.audio is not None:
+            source_audio = base_clip.audio
+            if source_audio.duration < duracao_alvo:
+                count = int(duracao_alvo / max(source_audio.duration, 0.1)) + 1
+                music = concatenate_audioclips([source_audio] * count).subclip(0, duracao_alvo)
+            else:
+                music = source_audio.subclip(0, duracao_alvo)
+            music = music.fx(volumex, 0.12).fx(audio_fadein, 0.25).fx(audio_fadeout, min(0.6, duracao_alvo/3))
+            audio_final = CompositeAudioClip([narracao_audio.fx(volumex, 1.0), music]).set_duration(duracao_alvo)
+            clips_to_close.extend([music, audio_final])
+        else:
+            audio_final = narracao_audio.fx(volumex, 1.0).set_duration(duracao_alvo)
 
-    except Exception as e:
-        return {"status": "ERRO_RENDER", "detalhe": str(e)}
+        path_head = criar_overlay_headline(headline)
+        headline_clip = ImageClip(path_head).set_start(0).set_duration(duracao_alvo).set_pos(("center", HEADLINE_Y))
+        clips_to_close.append(headline_clip)
+
+        caption_clips = montar_clips_legenda(word_events, duracao_alvo)
+        clips_to_close.extend(caption_clips)
+        video_final = CompositeVideoClip([video_base, headline_clip] + caption_clips,
+                                         size=(WIDTH, HEIGHT)).set_duration(duracao_alvo).set_audio(audio_final)
+        clips_to_close.append(video_final)
+
+        output_name = f"klebee_dynamic_{os.urandom(4).hex()}.mp4"
+        output_path = os.path.join(OUTPUT_DIR, output_name)
+        video_final.write_videofile(
+            output_path, fps=24, codec="libx264", audio_codec="aac",
+            preset="ultrafast", threads=2, logger=None,
+            ffmpeg_params=["-movflags", "+faststart"]
+        )
+        return FileResponse(output_path, media_type="video/mp4", filename=output_name)
+    except Exception as exc:
+        return {"status": "ERRO_RENDER", "detalhe": str(exc)}
+    finally:
+        for clip in reversed(clips_to_close):
+            try:
+                clip.close()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     import uvicorn
