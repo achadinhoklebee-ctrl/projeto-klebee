@@ -2,6 +2,7 @@ import os
 import hashlib
 import asyncio
 import subprocess
+import textwrap
 import numpy as np
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, FileResponse
@@ -17,7 +18,7 @@ from moviepy.editor import (
 )
 from moviepy.audio.fx.all import audio_fadein, audio_fadeout, volumex
 
-app = FastAPI(title="Klebee Cloud Engine - V144")
+app = FastAPI(title="Klebee Cloud Engine - V144 Pro")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "videos")
@@ -32,7 +33,6 @@ def baixar_video_tiktok(url_tiktok):
     if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
         return output_path
 
-    # Baixa o vídeo via yt-dlp sem marca d'água na nuvem
     cmd = [
         "yt-dlp",
         "-f", "b",
@@ -53,7 +53,10 @@ async def gerar_audio_narracao(texto):
     await communicate.save(path_audio)
     return path_audio
 
-def criar_overlay_texto_flutuante(texto, largura=1080, altura=250, cor_texto="yellow", tamanho_fonte=62):
+def criar_overlay_texto_flutuante(texto, largura=1080, altura=350, cor_texto="yellow", tamanho_fonte=52):
+    # Quebra automática de linhas para nunca estourar a largura do vídeo 9:16
+    linhas = textwrap.wrap(texto, width=24)
+    
     img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
@@ -74,17 +77,53 @@ def criar_overlay_texto_flutuante(texto, largura=1080, altura=250, cor_texto="ye
     if not font:
         font = ImageFont.load_default()
 
-    centro_x = largura // 2
-    centro_y = altura // 2
+    pad_x = 30
+    pad_y = 20
     
-    raio_borda = 4
-    for dx in range(-raio_borda, raio_borda + 1):
-        for dy in range(-raio_borda, raio_borda + 1):
-            if dx != 0 or dy != 0:
-                draw.text((centro_x + dx, centro_y + dy), texto, font=font, fill="black", anchor="mm")
-                
-    draw.text((centro_x, centro_y), texto, font=font, fill=cor_texto, anchor="mm")
+    # Calcular dimensões do bloco de texto
+    line_widths = []
+    line_heights = []
+    for linha in linhas:
+        bbox = font.getbbox(linha)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        line_widths.append(w)
+        line_heights.append(h)
     
+    max_w = max(line_widths) if line_widths else 100
+    total_h = sum(line_heights) + (len(linhas) - 1) * 12
+    
+    box_w = max_w + (pad_x * 2)
+    box_h = total_h + (pad_y * 2)
+    
+    box_x = (largura - box_w) // 2
+    box_y = (altura - box_h) // 2
+    
+    # Desenhar fundo estilo "pill" escuro semi-transparente para destaque profissional
+    draw.rounded_rectangle(
+        [box_x, box_y, box_x + box_w, box_y + box_h],
+        radius=18,
+        fill=(0, 0, 0, 190)
+    )
+    
+    # Renderizar linhas centralizadas com contorno preto forte
+    current_y = box_y + pad_y
+    for i, linha in enumerate(linhas):
+        w = line_widths[i]
+        h = line_heights[i]
+        line_x = box_x + (box_w - w) // 2
+        
+        # Sombra de contorno
+        offset = 3
+        for dx in range(-offset, offset + 1):
+            for dy in range(-offset, offset + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((line_x + dx, current_y + dy), linha, font=font, fill=(0, 0, 0, 255))
+        
+        # Texto principal coloridinho
+        draw.text((line_x, current_y), linha, font=font, fill=cor_texto)
+        current_y += h + 12
+        
     filename = f"temp_txt_{abs(hash(texto))}.png"
     path_img = os.path.join(CACHE_AUDIO_DIR, filename)
     img.save(path_img)
@@ -110,7 +149,7 @@ def home():
     <body>
         <div class="card">
             <h1>🚀 Super Robô Klebee V144</h1>
-            <p>Gerador Autônomo de Vídeos Curtos na Nuvem</p>
+            <p>Gerador Autônomo de Vídeos Curtos na Nuvem (Pro)</p>
             <a class="btn" href="/render?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461">🟢 GERAR VÍDEO DO TIKTOK</a>
         </div>
     </body>
@@ -120,7 +159,6 @@ def home():
 @app.get("/render")
 def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461")):
     try:
-        # Baixar vídeo bruto direto do TikTok na nuvem
         video_path = baixar_video_tiktok(video_url)
         
         base_clip = VideoFileClip(video_path)
@@ -144,16 +182,17 @@ def render(video_url: str = Query("https://www.tiktok.com/@carey_collections/vid
         narração_audio = AudioFileClip(audio_voz_path)
 
         if base_clip.audio is not None:
-            trilha_fundo = base_clip.audio.subclip(0, duracao_alvo).fx(volumex, 0.15)
+            trilha_fundo = base_clip.audio.subclip(0, duracao_alvo).fx(volumex, 0.12)
             audio_final = CompositeAudioClip([narração_audio.fx(volumex, 1.2), trilha_fundo])
         else:
             audio_final = narração_audio.fx(volumex, 1.2)
 
-        t1 = ImageClip(criar_overlay_texto_flutuante("🚨 ACHADINHO INCRÍVEL!", cor_texto="#FACC15", tamanho_fonte=65)).set_start(0.0).set_duration(2.8).set_pos(('center', 300))
-        t2 = ImageClip(criar_overlay_texto_flutuante("🔥 PRÁTICO E MODERNO!", cor_texto="#FFFFFF", tamanho_fonte=70)).set_start(2.8).set_duration(2.2).set_pos(('center', 300))
-        t3 = ImageClip(criar_overlay_texto_flutuante("📏 FACILITA SUA ROTINA!", cor_texto="#FACC15", tamanho_fonte=60)).set_start(5.0).set_duration(4.0).set_pos(('center', 1450))
-        t4 = ImageClip(criar_overlay_texto_flutuante("⚡ OFERTA POR TEMPO LIMITADO", cor_texto="#FFFFFF", tamanho_fonte=58)).set_start(9.0).set_duration(3.0).set_pos(('center', 1450))
-        t5 = ImageClip(criar_overlay_texto_flutuante("👇 CLIQUE NO LINK E GARANTA O SEU!", cor_texto="#22C55E", tamanho_fonte=55)).set_start(12.0).set_duration(3.0).set_pos(('center', 1600))
+        # Legendas estruturadas, centralizadas e com quebra de linha automática (posicionadas na zona nobre do feed)
+        t1 = ImageClip(criar_overlay_texto_flutuante("🚨 ACHADINHO INCRÍVEL PARA SUA CASA!", cor_texto="#FACC15", tamanho_fonte=54)).set_start(0.0).set_duration(3.0).set_pos(('center', 1100))
+        t2 = ImageClip(criar_overlay_texto_flutuante("🔥 PRÁTICO, MODERNO E ESSENCIAL", cor_texto="#FFFFFF", tamanho_fonte=54)).set_start(3.0).set_duration(3.0).set_pos(('center', 1100))
+        t3 = ImageClip(criar_overlay_texto_flutuante("📏 VAI FACILITAR DEMAIS A SUA ROTINA!", cor_texto="#FACC15", tamanho_fonte=52)).set_start(6.0).set_duration(3.5).set_pos(('center', 1100))
+        t4 = ImageClip(criar_overlay_texto_flutuante("⚡ CORRE ANTES QUE ESGOTE NO ESTOQUE", cor_texto="#FFFFFF", tamanho_fonte=52)).set_start(9.5).set_duration(2.8).set_pos(('center', 1100))
+        t5 = ImageClip(criar_overlay_texto_flutuante("👇 CLIQUE NO LINK DA BIO E GARANTA O SEU!", cor_texto="#22C55E", tamanho_fonte=52)).set_start(12.3).set_duration(2.7).set_pos(('center', 1100))
 
         video_final = CompositeVideoClip([video_base, t1, t2, t3, t4, t5], size=(1080, 1920))
         video_final = video_final.set_duration(duracao_alvo).set_audio(audio_final)
