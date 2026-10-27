@@ -325,3 +325,11 @@ async def render_video(
         tb = traceback.format_exc()
         print(tb)
         raise HTTPException(500, f"Erro V177: {e} | {tb[-1000:]}")
+
+
+# === FIX RAILWAY - faz o app responder na porta $PORT ===
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    print(f"[{VERSION}] Iniciando na porta {port} - CAPTION_Y={CAPTION_Y} 2 linhas")
+    uvicorn.run(app, host="0.0.0.0", port=port)
