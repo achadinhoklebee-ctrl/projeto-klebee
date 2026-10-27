@@ -1,4 +1,4 @@
-"""Super Robô Klebee — Motor Definitivo com Fallback de Timestamps (Estilo Premiere Pro)"""
+"""Super Robô Klebee — Motor Definitivo com Correção de Bitrate AAC (Estilo Premiere Pro)"""
 from __future__ import annotations
 import json, os, re, shutil, subprocess, uuid
 from pathlib import Path
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-PRO-ASS-FALLBACK-2026-10-27"
+VERSION = "KLEBEE-PRO-ASS-AAC-FIX-2026-10-27"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -102,12 +102,9 @@ async def make_voice(text: str, path: Path) -> list[dict[str, Any]]:
     with path.open("wb") as f:
         f.write(audio_bytes)
         
-    # FALLBACK INTELIGENTE: Se a API online não retornar os timestamps por palavra, 
-    # nós calculamos a distribuição proporcional com base na duração do áudio.
     if not words:
         clean_words = text.split()
         if clean_words:
-            # Estima duração do áudio baseada no tamanho do arquivo mp3 (aproximadamente)
             audio_duration = max(3.0, len(audio_bytes) / 16000.0) 
             step = audio_duration / len(clean_words)
             for i, w in enumerate(clean_words):
@@ -169,7 +166,7 @@ def render(source: Path, audio: Path, ass: Path, headline: Path, output: Path, d
              f"subtitles='{ass_path}'[subbed];[2:v]format=rgba[head];[subbed][head]overlay=0:120:shortest=1[vout]")
     run([binary("ffmpeg"), "-y", "-stream_loop", "-1", "-i", str(source), "-i", str(audio), "-loop", "1", "-i", str(headline),
          "-filter_complex", graph, "-map", "[vout]", "-map", "1:a:0", "-t", f"{duration:.3f}", "-r", str(FPS),
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)], 600)
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)], 600)
     if not output.is_file() or output.stat().st_size < 100_000: raise RuntimeError("FFmpeg não produziu MP4 válido.")
 
 @app.get("/", response_class=HTMLResponse)
