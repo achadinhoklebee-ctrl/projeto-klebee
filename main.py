@@ -1,4 +1,4 @@
-"""Super Robô Klebee — V157 - DEFINITIVO - SEM WORDBOUNDARY - TEMPO REAL"""
+"""Super Robô Klebee — V158 - FIX DUPLICACAO - 1 FRASE = 1 LEGENDA - PREMIERE"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback
 from pathlib import Path
@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "KLEBEE-V157-TEMPO-REAL"
+VERSION = "KLEBEE-V158-PREMIERE-1X"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -53,7 +53,7 @@ def wrap(draw, text, f, max_width):
 def make_headline(path: Path, text: str):
     image = Image.new("RGBA", (W, 480), (0,0,0,0))
     draw = ImageDraw.Draw(image)
-    size = 110
+    size = 112
     while size >= 60:
         f = font(size)
         if wrap(draw, text.upper(), f, W-120): break
@@ -77,34 +77,23 @@ def esc_ass(s: str) -> str:
     return s.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
 async def make_voice_and_words_real_time(text: str, audio_path: Path, duration: float):
-    # Gera audio
     comm = edge_tts.Communicate(text, VOICE, rate=RATE)
     audio_bytes = bytearray()
     async for chunk in comm.stream():
-        if chunk["type"] == "audio":
-            audio_bytes.extend(chunk["data"])
+        if chunk["type"] == "audio": audio_bytes.extend(chunk["data"])
     if not audio_bytes: raise RuntimeError("TTS sem audio")
     with audio_path.open("wb") as f: f.write(audio_bytes)
-    
-    # FIX DEFINITIVO: Ignora WordBoundary e calcula pelo tempo real
-    # Igual 【entity-Premiere Pro¦canonical_name=Premiere Pro】 faz
     clean_words = text.split()
-    total_words = len(clean_words)
-    if total_words == 0: raise RuntimeError("Sem palavras")
-    
-    # Reserva 0.2s de silencio no inicio e fim
     usable_duration = max(0.5, duration - 0.4)
-    time_per_word = usable_duration / total_words
-    
-    words = []
+    time_per_word = usable_duration / max(1, len(clean_words))
+    words=[]
     for i, w in enumerate(clean_words):
         start = 0.2 + i * time_per_word
         end = start + time_per_word
         words.append({"text": w, "start": start, "end": end})
-    
     return words
 
-def make_ass_tempo_real(path: Path, words, duration: float):
+def make_ass_premiere_1x(path: Path, words, duration: float):
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -114,12 +103,12 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,DejaVu Sans,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,2,2,80,80,300,1
+Style: Caption,DejaVu Sans,74,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,2,2,80,80,300,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    # Blocos de 2 palavras - padrao TikTok
+    # Blocos de 2 palavras - 1 legenda por bloco
     blocks=[]
     cur=[]
     for w in words:
@@ -130,27 +119,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     events=[]
     for block in blocks:
-        for idx, active in enumerate(block):
-            s = active["start"]
-            if idx+1 < len(block):
-                e = block[idx+1]["start"] - 0.01
-            else:
-                try:
-                    b_idx = blocks.index(block)
-                    e = blocks[b_idx+1][0]["start"] - 0.01
-                except:
-                    e = min(duration, active["end"] + 0.1)
-            if e <= s: e = s + 0.35
-            
-            parts=[]
-            for j, bw in enumerate(block):
-                tok=esc_ass(bw["text"])
-                if j==idx:
-                    parts.append(f"{{\\c&H00E5FF&\\b1}}{tok}{{\\c&HFFFFFF&\\b0}}")
-                else:
-                    parts.append(tok)
-            line=" ".join(parts)
-            events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line}")
+        s = block[0]["start"]
+        e = min(duration, block[-1]["end"])
+        if e <= s: e = s + 0.7
+
+        # 1 FRASE = 1 LEGENDA com karaoke \k
+        line = ""
+        for w in block:
+            # Duracao em centesimos para \k
+            k_dur = int(max(0.15, w["end"] - w["start"]) * 100)
+            if k_dur < 15: k_dur = 35
+            line += f"{{\\k{k_dur}}}{esc_ass(w['text'])} "
+
+        events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Caption,,0,0,0,,{line.strip()}")
 
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
@@ -173,7 +154,7 @@ def render(source, audio, ass, headline, output, duration):
     run(cmd,400)
 
 @app.get("/")
-def home(): return HTMLResponse(f"<h1>KLEBEE V157 - TEMPO REAL</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V157</a>")
+def home(): return HTMLResponse(f"<h1>KLEBEE V158 - 1 FRASE = 1 LEGENDA</h1><a href='/render-web?video_url=https://www.tiktok.com/@carey_collections/video/7688751450901597461&headline=ACHADINHO%20QUE%20FACILITA%20SUA%20VIDA'>GERAR V158</a>")
 
 @app.get("/health")
 def health(): return {"status":"ok","version":VERSION}
@@ -182,27 +163,21 @@ def health(): return {"status":"ok","version":VERSION}
 async def render_web(video_url: str = Query("https://www.tiktok.com/@carey_collections/video/7688751450901597461"), headline: str = Query("ACHADINHO INCRIVEL!")):
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True)
     try:
-        source=download(video_url,folder)
-        audio=folder/"narration.mp3"
+        source=download(video_url,folder); audio=folder/"narration.mp3"
         txt="Olha esse achadinho incrivel para sua casa! Pratico, moderno e vai facilitar demais a sua rotina. Corre no link da bio e garanta o seu antes que esgote!"
-        # Primeiro probe do video fonte para definir duracao final
-        audio_placeholder = folder / "temp_audio_check.mp3"
-        # Gera audio temporario para medir duracao real
+        tmp = folder / "tmp.mp3"
         comm = edge_tts.Communicate(txt, VOICE, rate=RATE)
-        audio_bytes = bytearray()
-        async for chunk in comm.stream():
-            if chunk["type"] == "audio": audio_bytes.extend(chunk["data"])
-        with audio_placeholder.open("wb") as f: f.write(audio_bytes)
-        audio_dur = probe_duration(audio_placeholder)
-        duration = min(16.0, max(10.5, audio_dur + 0.5))
-        
-        # Agora gera palavras com tempo real baseado na duracao
-        words = await make_voice_and_words_real_time(txt, audio, duration)
-        
-        ass=folder/"captions.ass"; make_ass_tempo_real(ass,words,duration)
+        ab = bytearray()
+        async for ch in comm.stream():
+            if ch["type"]=="audio": ab.extend(ch["data"])
+        with tmp.open("wb") as f: f.write(ab)
+        audio_dur=probe_duration(tmp)
+        duration=min(16.0, max(10.5, audio_dur + 0.5))
+        words=await make_voice_and_words_real_time(txt,audio,duration)
+        ass=folder/"captions.ass"; make_ass_premiere_1x(ass,words,duration)
         hl=folder/"headline.png"; make_headline(hl,headline)
         out=folder/"klebee.mp4"; render(source,audio,ass,hl,out,duration)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v157.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v158.mp4")
     except Exception as e:
         print(traceback.format_exc()); raise HTTPException(500,f"Erro: {e}")
 
