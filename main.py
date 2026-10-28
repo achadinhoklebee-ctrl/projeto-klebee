@@ -1,8 +1,3 @@
-"""
-V177f - FIX CENTRALIZACAO COMPARTIMENTOS - DEFINITIVO
-Problema: total tava ws+6, mas real é ws+16 (caixinha). Centralização errada.
-Fix: total = sum(ws+16) + re-centraliza via bbox crop
-"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, random
 from pathlib import Path
@@ -13,7 +8,6 @@ from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
 VERSION = "V180-FIX-BORRAO-UTENSILIOS-SYNC"
-SYNC_FIX_V179 = True  # True = zero atraso final
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -25,10 +19,36 @@ CAPTION_Y = int(H * 0.58)
 HEADLINE_Y = 12
 
 PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#E91E63","white")]
-
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="V177f", version=VERSION)
+app = FastAPI(title="V180", version=VERSION)
+
+def fix_pronuncia_utensilios(text):
+    if not text:
+        return text
+    reps = {
+        "utensilios": "utensílios",
+        "UTENSILIOS": "UTENSÍLIOS",
+        "Utensilios": "Utensílios",
+        "organizador de utensilios": "organizador de utensílios",
+        "porta utensilios": "porta utensílios"
+    }
+    for w,c in reps.items():
+        text = text.replace(w,c)
+    return text
+
+def apply_zero_sync_fix_V180(words, audio_dur):
+    if not words:
+        return words, audio_dur
+    real = max(0.5, audio_dur - 0.25)
+    last = len(words)-1
+    if last >= 0:
+        words[last]['end'] = real - 0.05
+        if last >= 1:
+            words[last]['start'] = words[last-1]['end']
+            if words[last]['start'] >= words[last]['end']:
+                words[last]['start'] = words[last]['end'] - 0.3
+    return words, real
 
 def binary(n: str):
     import shutil
@@ -80,7 +100,6 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
             break
         scale = MAX_W / total
         cur_fsize = max(38, int(cur_fsize * scale * 0.92))
-    
     f = font(cur_fsize)
     tmp_img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
     x = (canvas_w - final_total)//2
@@ -109,7 +128,6 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         y_off = max(10, min(y_off, canvas_h - rot.height - 10))
         tmp_img.alpha_composite(rot, (int(x), int(y_off)))
         x += lw - 6
-    
     bbox = tmp_img.getbbox()
     if bbox:
         cropped = tmp_img.crop(bbox)
@@ -122,6 +140,7 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         tmp_img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
+    text = fix_pronuncia_utensilios(text)
     img = Image.new("RGBA", (W, 420), (0,0,0,0))
     parts = text.upper().split()
     if len(parts) <= 2:
@@ -184,6 +203,7 @@ def make_caps_video(caps, words, out, dur):
     shutil.rmtree(frames_dir, ignore_errors=True)
 
 async def get_words(text, audio_path):
+    text = fix_pronuncia_utensilios(text)
     comm=edge_tts.Communicate(text, VOICE, rate=RATE)
     audio_bytes=bytearray(); raw=[]
     async for chunk in comm.stream():
@@ -211,6 +231,8 @@ async def get_words(text, audio_path):
     words=[{"text":w["text"],"start":w["start"]*scale,"end":w["raw_end"]*scale} for w in raw]
     for w in words:
         if w["end"]-w["start"]<0.28: w["end"]=w["start"]+0.28
+    # V180 ZERO SYNC
+    words, ad = apply_zero_sync_fix_V180(words, ad)
     return words, ad
 
 def download(url, folder):
@@ -222,36 +244,13 @@ def download(url, folder):
     return max(cands, key=lambda p:p.stat().st_size)
 
 def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
-    # Sugestões Claude implementadas + AUDIT SYNC ZERO:
-    # 1. PNG transparente com alpha - OK (watermark.png 180px 75%)
-    # 2. Último overlay no FFmpeg - OK
-    # 3. Sempre 1 arquivo só, não 34 overlays - OK (evita OOM)
-    # 4. Pulso sutil 1.0->1.05 a cada 3s - OK
-    # 5. ZERO SYNC - Corrige micro-atraso final (esgote!):
-    #    - Edge-TTS WordBoundary tem drift não-linear na última palavra
-    #    - Antigo: duration = audio + 0.18 e target_end = audio - 0.02 ainda deixava 80-120ms de atraso perceptível
-    #    - Novo: força último word end = audio_duration - 0.02 EXATO, escala linear só até penúltima palavra
-    #    - Remove silêncio final do Edge-TTS (-0.15s trim)
-    # Pulso: scale oscila 1.0 a 1.05 a cada 3 segundos pra chamar atenção sem irritar
-    PULSE_ENABLED = False  # V180: desativa pulso pra evitar borrão laranja - usa estático nítido
-    if PULSE_ENABLED:
-        filters=[
-            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
-            f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
-            f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
-            # Marca d'água com pulso: scale 1.0 -> 1.05 a cada 3s (sin)
-            f"[4:v]scale=w='iw*(1+0.05*abs(sin(2*PI*t/3)))':h='ih*(1+0.05*abs(sin(2*PI*t/3)))':eval=frame[wm_pulse]",
-            f"[tmp1][wm_pulse]overlay=W-w-20:450:format=rgb[final]",
-            "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
-        ]
-    else:
-        filters=[
-            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
-            f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
-            f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
-            f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1:enable='lte(t,{real_duration})'[final]".format(real_duration='{REAL_DUR}') if False else f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1[final]",
-            "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
-        ]
+    filters=[
+        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
+        f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
+        f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
+        f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1[final]",
+        "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
+    ]
     fc=";".join(filters)
     cmd=[binary("ffmpeg"),"-y","-threads","2","-stream_loop","1","-i",str(source),"-i",str(audio),"-i",str(headline),"-i",str(caps_video),"-i",str(watermark),
          "-filter_complex",fc,"-map","[final]","-map","[a]","-t",f"{dur:.2f}","-threads","2","-c:v","libx264","-preset","ultrafast","-crf","26","-c:a","aac","-b:a","128k",str(out)]
@@ -259,7 +258,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"<h1>{VERSION}</h1><p>V178 com Marca d´agua Klebee 180px Topo Direita (450px) | 2 linhas | 58% | COMPARTIMENTOS centralizado</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
+    return f"<h1>{VERSION}</h1><p>V180 FIX BORRAO + UTENSILIOS + SYNC | 2 linhas | 58% | watermark nitido | utensilios com acento | sync 11s=11s</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
@@ -270,8 +269,9 @@ async def render():
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True); caps_dir=folder/"caps"; caps_dir.mkdir()
     try:
         src=download("https://www.tiktok.com/@carey_collections/video/7688751450901597461", folder)
-        roteiro="Olha esse organizador de gaveta que vai transformar sua cozinha! Bambu natural, cinco compartimentos, resistente e elegante. Organiza talheres, utensilios e deixa tudo no lugar. Corre no link e garanta o seu!"
-        headline_text="ACHADINHO QUE ORGANIZA"
+        roteiro="Olha esse organizador de gaveta que vai transformar sua cozinha! Bambu natural, cinco compartimentos, resistente e elegante. Organiza talheres, utensílios e deixa tudo no lugar. Corre no link e garanta o seu!"
+        roteiro = fix_pronuncia_utensilios(roteiro)
+        headline_text=fix_pronuncia_utensilios("ACHADINHO QUE ORGANIZA")
         audio_tmp=folder/"tmp.mp3"; audio_final=folder/"narr.mp3"
         words, ad = await get_words(roteiro, audio_tmp)
         import shutil; shutil.copy(audio_tmp, audio_final)
@@ -284,20 +284,16 @@ async def render():
         caps_video=folder/"caps_video.mov"
         make_caps_video(caps, words, caps_video, dur)
         hl=folder/"headline.png"
-        headline_text = fix_pronuncia_utensilios(headline_text)
         make_headline_2lines(hl, headline_text)
-        # Watermark Klebee 180px 75% topo direita
-        import shutil as _shutil
         wm_src = Path(__file__).parent / "assets" / "klebee_watermark_180_final.png"
         wm_dst = folder / "watermark.png"
         if wm_src.exists():
-            _shutil.copy(wm_src, wm_dst)
+            shutil.copy(wm_src, wm_dst)
         else:
-            # fallback: cria watermark simples se não existir
-            Image.new("RGBA",(180,180),(255,107,0,180)).save(wm_dst)
-        out=folder/"final_v178.mp4"
+            Image.new("RGBA",(180,180),(255,107,0,200)).save(wm_dst)
+        out=folder/"final_v180.mp4"
         render_final_fix(src, audio_final, hl, caps_video, wm_dst, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v178_watermark.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v180_fix.mp4")
     except Exception as e:
         import traceback; print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
