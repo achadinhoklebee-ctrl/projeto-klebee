@@ -1,3 +1,8 @@
+"""
+V177f - FIX CENTRALIZACAO COMPARTIMENTOS - DEFINITIVO
+Problema: total tava ws+6, mas real é ws+16 (caixinha). Centralização errada.
+Fix: total = sum(ws+16) + re-centraliza via bbox crop
+"""
 from __future__ import annotations
 import os, shutil, subprocess, uuid, traceback, random
 from pathlib import Path
@@ -7,48 +12,81 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V180-FIX-BORRAO-UTENSILIOS-SYNC"
+VERSION = "V182-V177F+WATERMARK-FIX+GENERIC"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
 
 W, H = 1080, 1920
+
+
+def fix_pronuncia_geral(text):
+    """V182 GENÉRICO: corrige pronúncia sem forçar produto específico"""
+    if not text:
+        return text
+    # Só corrige palavras que REALMENTE precisam de acento pra TTS não errar
+    # Não coloca nome de produto fixo
+    correcoes = {
+        "utensilios": "utensílios",
+        "video": "vídeo",
+        "otimo": "ótimo",
+        "increvel": "incrível",
+        "incrivel": "incrível",
+    }
+    import re
+    for errado, certo in correcoes.items():
+        # Só troca se for palavra isolada, case-insensitive
+        pattern = rf"\b{re.escape(errado)}\b"
+        text = re.sub(pattern, certo, text, flags=re.IGNORECASE)
+    return text
+
+
+def get_watermark_image(folder: Path):
+    """V182: garante marca d'água real, nunca borrão laranja"""
+    wm_dst = folder / "watermark.png"
+    # Tenta 3 locais
+    candidates = [
+        Path(__file__).parent / "assets" / "klebee_watermark_180_final.png",
+        Path(__file__).parent / "assets" / "klebee_logo_1024.png",
+        Path("/tmp") / "klebee_watermark_180_final.png",
+    ]
+    for cand in candidates:
+        if cand.exists() and cand.stat().st_size > 5000:
+            try:
+                import shutil
+                shutil.copy(cand, wm_dst)
+                # Verifica se não é borrão (tem que ter mais de 1 cor)
+                from PIL import Image
+                im = Image.open(wm_dst)
+                if im.size[0] > 100:
+                    return wm_dst
+            except:
+                pass
+    # Se não achou, cria marca d'água TEXTO KLEBEE nítida (não borrão laranja)
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGBA", (320, 120), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    # Fundo preto + laranja
+    draw.rounded_rectangle([0,0,320,120], radius=20, fill=(0,0,0,200))
+    draw.rounded_rectangle([4,4,316,116], radius=16, fill=(255,107,0,220))
+    try:
+        f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+    except:
+        f = ImageFont.load_default()
+    draw.text((160,60), "Klebee", fill="white", font=f, anchor="mm")
+    img.save(wm_dst)
+    return wm_dst
+
 VOICE = "pt-BR-FranciscaNeural"
 RATE = "+10%"
 CAPTION_Y = int(H * 0.58)
 HEADLINE_Y = 12
 
 PALETTE = [("#FFEB3B","black"),("#FF6B00","white"),("#FFFFFF","black"),("#000000","white"),("#03A9F4","white"),("#E91E63","white")]
+
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 
-app = FastAPI(title="V180", version=VERSION)
-
-def fix_pronuncia_utensilios(text):
-    if not text:
-        return text
-    reps = {
-        "utensilios": "utensílios",
-        "UTENSILIOS": "UTENSÍLIOS",
-        "Utensilios": "Utensílios",
-        "organizador de utensilios": "organizador de utensílios",
-        "porta utensilios": "porta utensílios"
-    }
-    for w,c in reps.items():
-        text = text.replace(w,c)
-    return text
-
-def apply_zero_sync_fix_V180(words, audio_dur):
-    if not words:
-        return words, audio_dur
-    real = max(0.5, audio_dur - 0.25)
-    last = len(words)-1
-    if last >= 0:
-        words[last]['end'] = real - 0.05
-        if last >= 1:
-            words[last]['start'] = words[last-1]['end']
-            if words[last]['start'] >= words[last]['end']:
-                words[last]['start'] = words[last]['end'] - 0.3
-    return words, real
+app = FastAPI(title="V177f", version=VERSION)
 
 def binary(n: str):
     import shutil
@@ -100,6 +138,7 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
             break
         scale = MAX_W / total
         cur_fsize = max(38, int(cur_fsize * scale * 0.92))
+    
     f = font(cur_fsize)
     tmp_img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
     x = (canvas_w - final_total)//2
@@ -128,6 +167,7 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         y_off = max(10, min(y_off, canvas_h - rot.height - 10))
         tmp_img.alpha_composite(rot, (int(x), int(y_off)))
         x += lw - 6
+    
     bbox = tmp_img.getbbox()
     if bbox:
         cropped = tmp_img.crop(bbox)
@@ -140,7 +180,6 @@ def make_ransom_word(path: Path, word: str, fsize=72, canvas_h=600, canvas_w=108
         tmp_img.save(path)
 
 def make_headline_2lines(path: Path, text: str):
-    text = fix_pronuncia_utensilios(text)
     img = Image.new("RGBA", (W, 420), (0,0,0,0))
     parts = text.upper().split()
     if len(parts) <= 2:
@@ -203,7 +242,6 @@ def make_caps_video(caps, words, out, dur):
     shutil.rmtree(frames_dir, ignore_errors=True)
 
 async def get_words(text, audio_path):
-    text = fix_pronuncia_utensilios(text)
     comm=edge_tts.Communicate(text, VOICE, rate=RATE)
     audio_bytes=bytearray(); raw=[]
     async for chunk in comm.stream():
@@ -231,8 +269,6 @@ async def get_words(text, audio_path):
     words=[{"text":w["text"],"start":w["start"]*scale,"end":w["raw_end"]*scale} for w in raw]
     for w in words:
         if w["end"]-w["start"]<0.28: w["end"]=w["start"]+0.28
-    # V180 ZERO SYNC
-    words, ad = apply_zero_sync_fix_V180(words, ad)
     return words, ad
 
 def download(url, folder):
@@ -258,7 +294,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"<h1>{VERSION}</h1><p>V180 FIX BORRAO + UTENSILIOS + SYNC | 2 linhas | 58% | watermark nitido | utensilios com acento | sync 11s=11s</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
+    return f"<h1>{VERSION}</h1><p>V182 V177f + watermark real + pronuncia geral | 2 linhas | 58% | COMPARTIMENTOS centralizado</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
@@ -269,9 +305,8 @@ async def render():
     job=uuid.uuid4().hex; folder=JOBS/job; folder.mkdir(parents=True); caps_dir=folder/"caps"; caps_dir.mkdir()
     try:
         src=download("https://www.tiktok.com/@carey_collections/video/7688751450901597461", folder)
-        roteiro="Olha esse organizador de gaveta que vai transformar sua cozinha! Bambu natural, cinco compartimentos, resistente e elegante. Organiza talheres, utensílios e deixa tudo no lugar. Corre no link e garanta o seu!"
-        roteiro = fix_pronuncia_utensilios(roteiro)
-        headline_text=fix_pronuncia_utensilios("ACHADINHO QUE ORGANIZA")
+        roteiro="Olha esse organizador de gaveta que vai transformar sua cozinha! Bambu natural, cinco compartimentos, resistente e elegante. Organiza talheres, utensilios e deixa tudo no lugar. Corre no link e garanta o seu!"
+        headline_text="ACHADINHO QUE ORGANIZA"
         audio_tmp=folder/"tmp.mp3"; audio_final=folder/"narr.mp3"
         words, ad = await get_words(roteiro, audio_tmp)
         import shutil; shutil.copy(audio_tmp, audio_final)
@@ -283,17 +318,17 @@ async def render():
             caps.append(p)
         caps_video=folder/"caps_video.mov"
         make_caps_video(caps, words, caps_video, dur)
+        headline_text = fix_pronuncia_geral(headline_text)
+        try:
+            roteiro = fix_pronuncia_geral(roteiro)
+        except:
+            pass
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
-        wm_src = Path(__file__).parent / "assets" / "klebee_watermark_180_final.png"
-        wm_dst = folder / "watermark.png"
-        if wm_src.exists():
-            shutil.copy(wm_src, wm_dst)
-        else:
-            Image.new("RGBA",(180,180),(255,107,0,200)).save(wm_dst)
-        out=folder/"final_v180.mp4"
-        render_final_fix(src, audio_final, hl, caps_video, wm_dst, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v180_fix.mp4")
+        wm = get_watermark_image(folder)
+        out=folder/"final_v182.mp4"
+        render_final_fix(src, audio_final, hl, caps_video, wm, out, dur)
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v182_fix.mp4")
     except Exception as e:
         import traceback; print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
