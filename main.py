@@ -12,69 +12,45 @@ from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont
 from yt_dlp import YoutubeDL
 
-VERSION = "V182-V177F+WATERMARK-FIX+GENERIC"
+VERSION = "V183-CLAUDIO-FIX"
 ROOT = Path(os.getenv("KLEBEE_WORKDIR", "/tmp/klebee"))
 JOBS = ROOT / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
 
 W, H = 1080, 1920
 
-
-def fix_pronuncia_geral(text):
-    """V182 GENÉRICO: corrige pronúncia sem forçar produto específico"""
+def fix_pronuncia_generica(text):
     if not text:
         return text
-    # Só corrige palavras que REALMENTE precisam de acento pra TTS não errar
-    # Não coloca nome de produto fixo
-    correcoes = {
-        "utensilios": "utensílios",
-        "video": "vídeo",
-        "otimo": "ótimo",
-        "increvel": "incrível",
-        "incrivel": "incrível",
-    }
     import re
-    for errado, certo in correcoes.items():
-        # Só troca se for palavra isolada, case-insensitive
-        pattern = rf"\b{re.escape(errado)}\b"
-        text = re.sub(pattern, certo, text, flags=re.IGNORECASE)
-    return text
+    t = text
+    t = re.sub(r"\butensilios\b", "utensílios", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bKlebee\b", "Clébi", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bShopee\b", "Xopi", t, flags=re.IGNORECASE)
+    return t
 
-
-def get_watermark_image(folder: Path):
-    """V182: garante marca d'água real, nunca borrão laranja"""
+def get_watermark_real(folder):
     wm_dst = folder / "watermark.png"
-    # Tenta 3 locais
     candidates = [
         Path(__file__).parent / "assets" / "klebee_watermark_180_final.png",
-        Path(__file__).parent / "assets" / "klebee_logo_1024.png",
-        Path("/tmp") / "klebee_watermark_180_final.png",
+        Path("/mnt/data/watermark_klebee/klebee_watermark_500_v3_perfect.png"),
     ]
-    for cand in candidates:
-        if cand.exists() and cand.stat().st_size > 5000:
-            try:
-                import shutil
-                shutil.copy(cand, wm_dst)
-                # Verifica se não é borrão (tem que ter mais de 1 cor)
-                from PIL import Image
-                im = Image.open(wm_dst)
-                if im.size[0] > 100:
-                    return wm_dst
-            except:
-                pass
-    # Se não achou, cria marca d'água TEXTO KLEBEE nítida (não borrão laranja)
-    from PIL import Image, ImageDraw, ImageFont
-    img = Image.new("RGBA", (320, 120), (0,0,0,0))
-    draw = ImageDraw.Draw(img)
-    # Fundo preto + laranja
-    draw.rounded_rectangle([0,0,320,120], radius=20, fill=(0,0,0,200))
-    draw.rounded_rectangle([4,4,316,116], radius=16, fill=(255,107,0,220))
-    try:
-        f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
-    except:
-        f = ImageFont.load_default()
-    draw.text((160,60), "Klebee", fill="white", font=f, anchor="mm")
-    img.save(wm_dst)
+    src = None
+    for c in candidates:
+        if c.exists() and c.stat().st_size > 5000:
+            src = c
+            break
+    if src is None:
+        from PIL import Image
+        Image.new("RGBA",(1,1),(0,0,0,0)).save(wm_dst)
+        return wm_dst
+    from PIL import Image
+    im = Image.open(src).convert("RGBA")
+    im.thumbnail((180,180), Image.LANCZOS)
+    r,g,b,a = im.split()
+    a = a.point(lambda p: int(p*0.75))
+    im = Image.merge("RGBA",(r,g,b,a))
+    im.save(wm_dst)
     return wm_dst
 
 VOICE = "pt-BR-FranciscaNeural"
@@ -264,9 +240,10 @@ async def get_words(text, audio_path):
     if not raw:
         clean=text.split(); tpw=ad/max(1,len(clean))
         return [{"text":w,"start":i*tpw,"end":(i+1)*tpw} for i,w in enumerate(clean)], ad
-    last_raw=max(w["raw_end"] for w in raw)
-    scale=ad/max(0.1,last_raw)
-    words=[{"text":w["text"],"start":w["start"]*scale,"end":w["raw_end"]*scale} for w in raw]
+    # V183 CLAUDIO FIX - sem escala, usa offset cru
+    words=[{"text":w["text"],"start":w["start"],"end":w["raw_end"]} for w in raw]
+    if words:
+        words[-1]["end"] = ad - 0.02
     for w in words:
         if w["end"]-w["start"]<0.28: w["end"]=w["start"]+0.28
     return words, ad
@@ -284,7 +261,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
         f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,setpts=N/FRAME_RATE/TB[bg]",
         f"[bg][2:v]overlay=0:{HEADLINE_Y}[tmp0]",
         f"[tmp0][3:v]overlay=(W-w)/2:{CAPTION_Y}[tmp1]",
-        f"[tmp1][4:v]overlay=W-w-20:450:format=rgb:alpha=1[final]",
+        f"[tmp1][4:v]overlay=W-w-20:450:format=auto:eval=frame[final]",
         "[1:a]volume=1.25[av];[0:a]volume=0.15[am];[av][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
     ]
     fc=";".join(filters)
@@ -294,7 +271,7 @@ def render_final_fix(source, audio, headline, caps_video, watermark, out, dur):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return f"<h1>{VERSION}</h1><p>V182 V177f + watermark real + pronuncia geral | 2 linhas | 58% | COMPARTIMENTOS centralizado</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
+    return f"<h1>{VERSION}</h1><p>FIX CENTRALIZACAO COMPARTIMENTOS | 2 linhas | 58%</p><a href='/render'><h2>GERAR VIDEO</h2></a>"
 
 @app.get("/health")
 def health():
@@ -318,17 +295,13 @@ async def render():
             caps.append(p)
         caps_video=folder/"caps_video.mov"
         make_caps_video(caps, words, caps_video, dur)
-        headline_text = fix_pronuncia_geral(headline_text)
-        try:
-            roteiro = fix_pronuncia_geral(roteiro)
-        except:
-            pass
+        headline_text = fix_pronuncia_generica(headline_text)
         hl=folder/"headline.png"
         make_headline_2lines(hl, headline_text)
-        wm = get_watermark_image(folder)
-        out=folder/"final_v182.mp4"
+        wm = get_watermark_real(folder)
+        out=folder/"final_v183.mp4"
         render_final_fix(src, audio_final, hl, caps_video, wm, out, dur)
-        return FileResponse(out, media_type="video/mp4", filename="klebee_v182_fix.mp4")
+        return FileResponse(out, media_type="video/mp4", filename="klebee_v183_claudio_fix.mp4")
     except Exception as e:
         import traceback; print(traceback.format_exc())
         raise HTTPException(500, f"Erro: {e}")
